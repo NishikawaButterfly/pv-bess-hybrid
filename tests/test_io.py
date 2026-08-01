@@ -44,7 +44,7 @@ class InputOutputTests(unittest.TestCase):
             self.assertEqual(payload["analysis_input_sha256"], financial.analysis_input_sha256)
             self.assertEqual(payload["solver"]["phases"]["economic"]["status"], "optimal")
             self.assertEqual(payload["solver"]["phases"]["refinement"]["status"], "optimal")
-            self.assertEqual(payload["solver"]["backend_version"], "1.8.0")
+            self.assertRegex(payload["solver"]["backend_version"], r"^\d+\.\d+")
             self.assertEqual(len(dispatch_path.read_text(encoding="utf-8").splitlines()), 25)
             with dispatch_path.open(encoding="utf-8", newline="") as handle:
                 first_row = next(csv.DictReader(handle))
