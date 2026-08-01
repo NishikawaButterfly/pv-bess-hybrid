@@ -1,0 +1,7 @@
+-r requirements.txt
+build==1.2.2.post1
+coverage==7.6.12
+mypy==1.15.0
+pip-audit==2.8.0
+ruff==0.11.2
+twine==6.1.0
