@@ -9,7 +9,7 @@
 - [x] analytical, failure-path, end-to-end, and seeded invariant tests;
 - [ ] independent review of equations and financial conventions;
 - [ ] CI green on Python 3.12 and 3.13 with at least 90% branch coverage in the scientific and financial kernel;
-- [ ] benchmark a complete 8,760-interval scenario and publish the hardware, runtime, solver gap, and input hash;
+- [x] benchmark a complete 8,760-interval scenario and publish the hardware, runtime, solver gap, and input hash (see `docs/benchmarks.md`);
 - [ ] tag the first alpha release with SBOM, checksums, and release notes.
 
 ## Next — scenario analysis
