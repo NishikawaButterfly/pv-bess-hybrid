@@ -37,6 +37,10 @@ With SciPy 1.15.2 and its bundled HiGHS 1.8.0, the committed sample produces:
 
 The negative sample NPV is intentional evidence that the software reports the configured assumptions instead of forcing a favorable investment conclusion. The fixture is synthetic and its 365x annualization is only a calculation demonstration.
 
+## Monthly sample anchor
+
+The synthetic 744-hour fixture in `sample-data/monthly/` is anchored the same way. CI regenerates the CSV from `tools/make_synthetic_year.py` (seed 2026, March slice) and requires byte equality, verifies both fixture hashes, and solves a one-week slice. The full-month solve runs only when `PV_BESS_RUN_SLOW_TESTS=1` is set; its expected values are asserted in `tests/test_monthly_sample.py` and measured runtimes per horizon are published in [benchmarks](benchmarks.md).
+
 ## Numerical tolerances
 
 - flow values within `1e-6 kW` of zero are normalized to zero;
@@ -58,5 +62,6 @@ Before the first tagged alpha release:
 
 1. an independent reviewer must approve equations, sign conventions, and LCOS treatment;
 2. CI must be green on Python 3.12 and 3.13;
-3. an 8,760-interval benchmark must publish runtime, hardware, solver gap, versions, and input hash;
-4. the release must include an SBOM, checksums, and notes tied to the exact commit.
+3. the release must include an SBOM, checksums, and notes tied to the exact commit.
+
+The previously required 8,760-interval benchmark (runtime, hardware, solver gap, versions, and input hash) is published in [benchmarks](benchmarks.md).

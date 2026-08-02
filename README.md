@@ -64,7 +64,7 @@ pv-bess run --scenario sample-data/scenario.json --output results/sample
 
 This writes `summary.json` (provenance, solver metadata, units, KPIs, cash flows) and `dispatch.csv` (per-interval flows, SOC, market value, degradation cost). Existing files are not overwritten unless you pass `--force`.
 
-The bundled sample is a synthetic 24-hour day annualized with an explicit factor of 365. It demonstrates the calculation flow and nothing more; see [`sample-data/README.md`](sample-data/README.md).
+The bundled sample is a synthetic 24-hour day annualized with an explicit factor of 365. It demonstrates the calculation flow and nothing more; see [`sample-data/README.md`](sample-data/README.md). A larger deterministic fixture, a synthetic 744-hour month, lives in [`sample-data/monthly/`](sample-data/monthly/README.md); measured solver timings per horizon are published in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Input format
 
@@ -118,11 +118,12 @@ CI additionally runs formatting, lint, strict typing, branch coverage, a package
 ## Layout
 
 ```text
-sample-data/        fictional input fixture
+sample-data/        fictional input fixtures (daily and monthly)
 src/pv_bess/        models, dispatch MILP, finance, I/O, CLI, provenance, optional API
 tests/              unit tests
+tools/              deterministic fixture generator
 web/                static results page served by the optional API
-docs/               data contract, methodology, limitations, threat model
+docs/               data contract, methodology, limitations, benchmarks, threat model
 legacy/             migration note about the retired prototype
 ```
 
