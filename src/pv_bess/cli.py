@@ -51,6 +51,13 @@ def _parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="serve the optional dispatch API over HTTP")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
+
+    export_xlsx = subparsers.add_parser(
+        "export-xlsx", help="export a completed run directory to an Excel workbook"
+    )
+    export_xlsx.add_argument("--input", type=Path, required=True)
+    export_xlsx.add_argument("--output", type=Path, required=True)
+    export_xlsx.add_argument("--force", action="store_true")
     return parser
 
 
@@ -78,10 +85,30 @@ def _serve(host: str, port: int) -> int:
     return 0
 
 
+def _export_xlsx(input_directory: Path, output_path: Path, *, force: bool) -> int:
+    """Import the workbook writer lazily so a kernel-only install stays Excel-free."""
+
+    try:
+        from pv_bess.xlsx import export_workbook
+    except ImportError as exc:
+        _fail(
+            "the Excel dependencies are not installed; install the 'xlsx' extra "
+            f"(pip install 'pv-bess-hybrid[xlsx]'): {exc}"
+        )
+    try:
+        workbook_path = export_workbook(input_directory, output_path, force=force)
+    except (FileExistsError, ValueError) as exc:
+        _fail(str(exc))
+    print(f"workbook: {workbook_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "serve":
         return _serve(args.host, args.port)
+    if args.command == "export-xlsx":
+        return _export_xlsx(args.input, args.output, force=args.force)
     try:
         scenario, financial_assumptions = load_scenario(args.scenario)
         if args.command == "validate":
