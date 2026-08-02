@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NishikawaButterfly/pv-bess-hybrid/actions/workflows/ci.yml/badge.svg)](https://github.com/NishikawaButterfly/pv-bess-hybrid/actions/workflows/ci.yml)
 
-A Python model for dispatch of solar-plus-battery plants. It reads hourly PV production and market prices, computes a battery dispatch schedule (a mixed-integer program solved with HiGHS), and works out NPV, IRR, payback and LCOS for the scenario. Early alpha, command-line only.
+A Python model for dispatch of solar-plus-battery plants. It reads hourly PV production and market prices, computes a battery dispatch schedule (a mixed-integer program solved with HiGHS), and works out NPV, IRR, payback and LCOS for the scenario. Early alpha.
 
 The scope is dispatch plus unlevered, pre-tax investment math. Results are scenario calculations, not forecasts, grid-code studies, equipment certifications, or investment advice.
 
@@ -98,6 +98,8 @@ curl -F scenario=@sample-data/scenario.json \
   http://127.0.0.1:8000/api/v1/dispatch
 ```
 
+The server also bundles a small results page at its root: open `http://127.0.0.1:8000/`, upload the two files, and it renders the financial summary next to hand-drawn SVG charts of PV production, prices, battery flows, state of charge, grid exchange, and curtailment. The page is plain HTML, CSS, and JavaScript from the `web/` directory with no frontend dependencies, and it reads the per-interval series that the API returns under `dispatch_intervals`.
+
 ## Tests
 
 If NumPy and SciPy are already installed, nothing else is needed:
@@ -119,6 +121,7 @@ CI additionally runs formatting, lint, strict typing, branch coverage, a package
 sample-data/        fictional input fixture
 src/pv_bess/        models, dispatch MILP, finance, I/O, CLI, provenance, optional API
 tests/              unit tests
+web/                static results page served by the optional API
 docs/               data contract, methodology, limitations, threat model
 legacy/             migration note about the retired prototype
 ```
@@ -127,7 +130,7 @@ The library itself has no required web framework or database dependency; the HTT
 
 ## What it doesn't do
 
-This is a dispatch model, nothing more. It does no electrical design — no protection, short-circuit, cable, transformer, EMF, or thermal calculations. It doesn't check grid-code compliance or certify equipment. There is no price forecasting and no live market connection. The financials ignore taxes, debt, and grants, and there is no probabilistic analysis. No web interface, no persistence, no multi-user anything: just the CLI and an optional single-process HTTP API.
+This is a dispatch model, nothing more. It does no electrical design — no protection, short-circuit, cable, transformer, EMF, or thermal calculations. It doesn't check grid-code compliance or certify equipment. There is no price forecasting and no live market connection. The financials ignore taxes, debt, and grants, and there is no probabilistic analysis. No persistence, no accounts, no multi-user anything: just the CLI, an optional single-process HTTP API, and the static results page it serves.
 
 See [known limitations](docs/limitations.md) and the [roadmap](ROADMAP.md).
 

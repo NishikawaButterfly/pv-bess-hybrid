@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import tempfile
 from importlib import metadata
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 import scipy
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from pv_bess.dispatch import DispatchOptimizationError, _highs_backend_version, optimize_dispatch
 from pv_bess.finance import evaluate_financials
@@ -21,10 +23,17 @@ from pv_bess.io import (
     load_scenario,
     write_results,
 )
-from pv_bess.models import MODEL_VERSION, SCHEMA_VERSION
+from pv_bess.models import MODEL_VERSION, SCHEMA_VERSION, IntervalDispatch
 
 _READ_CHUNK_BYTES = 65_536
 _FALLBACK_TIME_SERIES_NAME = "time_series.csv"
+_WEB_DIRECTORY = Path(__file__).resolve().parents[2] / "web"
+
+# Windows can map .js and .css to other types through the registry, and the
+# browser then refuses to apply them. Pin the types the bundled page uses.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 
 def _package_version() -> str:
@@ -96,8 +105,34 @@ def _scenario_error_status_code(error: ScenarioFileError) -> int:
     return 400
 
 
+def _interval_payload(item: IntervalDispatch) -> dict[str, Any]:
+    """One interval in dispatch.csv column order, without the per-row hashes."""
+
+    return {
+        "timestamp": item.timestamp.isoformat(),
+        "interval_hours": item.interval_hours,
+        "pv_power_kw": item.pv_power_kw,
+        "market_price_eur_per_mwh": item.market_price_eur_per_mwh,
+        "pv_export_kw": item.pv_export_kw,
+        "pv_charge_kw": item.pv_charge_kw,
+        "grid_charge_kw": item.grid_charge_kw,
+        "battery_export_kw": item.battery_export_kw,
+        "grid_export_kw": item.grid_export_kw,
+        "curtailed_pv_kw": item.curtailed_pv_kw,
+        "soc_start_kwh": item.soc_start_kwh,
+        "soc_end_kwh": item.soc_end_kwh,
+        "market_value_eur": item.market_value_eur,
+        "degradation_cost_eur": item.degradation_cost_eur,
+        "net_operating_value_eur": item.net_operating_value_eur,
+    }
+
+
 def _run_uploaded_scenario(scenario_bytes: bytes, time_series_bytes: bytes) -> dict[str, Any]:
-    """Stage the uploads, run the CLI's exact pipeline, and return its summary."""
+    """Stage the uploads, run the CLI's exact pipeline, and return its summary.
+
+    The CLI splits its output between summary.json and dispatch.csv; the web page
+    needs both, so the per-interval series is added under ``dispatch_intervals``.
+    """
 
     with (
         tempfile.TemporaryDirectory() as staging_directory,
@@ -115,6 +150,7 @@ def _run_uploaded_scenario(scenario_bytes: bytes, time_series_bytes: bytes) -> d
         financial = evaluate_financials(dispatch, scenario, financial_assumptions)
         summary_path, _ = write_results(results_directory, dispatch, financial)
         payload: dict[str, Any] = json.loads(summary_path.read_text(encoding="utf-8"))
+        payload["dispatch_intervals"] = [_interval_payload(item) for item in dispatch.intervals]
         return payload
 
 
@@ -152,6 +188,12 @@ def create_app() -> FastAPI:
     @application.exception_handler(Exception)
     async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=500, content={"detail": "internal server error"})
+
+    # Registered after the API routes, so /health, /api/v1, and /docs keep
+    # priority. Installed wheels ship without web/, and the API stays complete
+    # without it.
+    if _WEB_DIRECTORY.is_dir():
+        application.mount("/", StaticFiles(directory=_WEB_DIRECTORY, html=True), name="web")
 
     return application
 
