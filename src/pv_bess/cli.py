@@ -9,8 +9,15 @@ from typing import NoReturn
 
 from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
 from pv_bess.finance import evaluate_financials
-from pv_bess.io import ScenarioFileError, load_scenario, write_results
+from pv_bess.io import (
+    ScenarioFileError,
+    load_scenario,
+    load_sensitivity_spec,
+    write_results,
+    write_sensitivity_results,
+)
 from pv_bess.provenance import analysis_sha256, scenario_sha256
+from pv_bess.sensitivity import run_sensitivity
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,6 +36,17 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--time-limit", type=float, default=60.0)
     run.add_argument("--mip-gap", type=float, default=1e-8)
     run.add_argument("--force", action="store_true")
+
+    sensitivity = subparsers.add_parser(
+        "sensitivity",
+        help="rerun one scenario across bounded one-at-a-time parameter variants",
+    )
+    sensitivity.add_argument("--scenario", type=Path, required=True)
+    sensitivity.add_argument("--spec", type=Path, required=True)
+    sensitivity.add_argument("--output", type=Path, required=True)
+    sensitivity.add_argument("--time-limit", type=float, default=60.0)
+    sensitivity.add_argument("--mip-gap", type=float, default=1e-8)
+    sensitivity.add_argument("--force", action="store_true")
 
     serve = subparsers.add_parser("serve", help="serve the optional dispatch API over HTTP")
     serve.add_argument("--host", default="127.0.0.1")
@@ -81,6 +99,22 @@ def main(argv: list[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+            return 0
+
+        if args.command == "sensitivity":
+            spec = load_sensitivity_spec(args.spec)
+            result = run_sensitivity(
+                scenario,
+                financial_assumptions,
+                spec,
+                time_limit_seconds=args.time_limit,
+                relative_mip_gap=args.mip_gap,
+            )
+            json_path, csv_path = write_sensitivity_results(args.output, result, force=args.force)
+            print(f"sensitivity_json: {json_path}")
+            print(f"sensitivity_csv: {csv_path}")
+            print(f"base_dispatch_input_sha256: {result.base.dispatch_input_sha256}")
+            print(f"base_analysis_input_sha256: {result.base.analysis_input_sha256}")
             return 0
 
         dispatch = optimize_dispatch(
