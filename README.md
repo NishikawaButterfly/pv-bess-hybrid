@@ -4,6 +4,10 @@
 
 A Python model for dispatch of solar-plus-battery plants. It reads hourly PV production and market prices, computes a battery dispatch schedule (a mixed-integer program solved with HiGHS), and works out NPV, IRR, payback and LCOS for the scenario. Early alpha.
 
+[**Try the live explorer**](https://pv-bess-hybrid.fly.dev/) - upload the
+sample scenario and hourly CSV from [sample-data/](sample-data/) and read the
+result as charts. Nothing you upload is stored.
+
 The scope is dispatch plus unlevered, pre-tax investment math. Results are scenario calculations, not forecasts, grid-code studies, equipment certifications, or investment advice.
 
 ## Background
