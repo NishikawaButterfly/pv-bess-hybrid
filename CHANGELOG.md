@@ -4,6 +4,8 @@ All notable changes are documented here. The format follows Keep a Changelog and
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-02
+
 ### Added
 
 - optional multi-year battery capacity fade (`calendar_fade_fraction_per_year`, `cycling_fade_fraction_per_efc`, `minimum_capacity_fraction`): per-year capacity fractions scale operating benefit and discharged energy consistently across NPV and LCOS, surface in `summary.json`, the web page, and the Excel Summary sheet, and default to zero so existing scenarios, results, and hashes are byte-identical;

@@ -7,6 +7,9 @@ A Python model for dispatch of solar-plus-battery plants. It reads hourly PV pro
 [**Try the live explorer**](https://pv-bess-hybrid.fly.dev/) - upload the
 sample scenario and hourly CSV from [sample-data/](sample-data/) and read the
 result as charts. Nothing you upload is stored.
+There is also a
+[short demo video](https://github.com/NishikawaButterfly/pv-bess-hybrid/releases/download/v0.1.0/pvbess-demo.mp4)
+of the sample scenario going in and the charts coming out.
 
 The scope is dispatch plus unlevered, pre-tax investment math. Results are scenario calculations, not forecasts, grid-code studies, equipment certifications, or investment advice.
 
