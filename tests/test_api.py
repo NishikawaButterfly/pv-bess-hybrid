@@ -73,6 +73,35 @@ class ApiTests(unittest.TestCase):
         self.assertAlmostEqual(payload["financial_summary"]["npv_eur"], -3_818_737.07961859)
         self.assertAlmostEqual(payload["financial_summary"]["lcos_eur_per_mwh"], 265.9735362230494)
 
+    def test_dispatch_includes_the_interval_series_for_charting(self) -> None:
+        response = self.client.post("/api/v1/dispatch", files=self._files())
+        self.assertEqual(response.status_code, 200)
+        intervals = response.json()["dispatch_intervals"]
+        self.assertEqual(len(intervals), 24)
+        first = intervals[0]
+        self.assertEqual(first["timestamp"], "2026-06-15T00:00:00+00:00")
+        self.assertEqual(first["interval_hours"], 1.0)
+        self.assertEqual(first["pv_power_kw"], 0.0)
+        self.assertEqual(first["market_price_eur_per_mwh"], 45.0)
+        for key in (
+            "pv_export_kw",
+            "pv_charge_kw",
+            "grid_charge_kw",
+            "battery_export_kw",
+            "grid_export_kw",
+            "curtailed_pv_kw",
+            "soc_start_kwh",
+            "soc_end_kwh",
+            "market_value_eur",
+            "degradation_cost_eur",
+            "net_operating_value_eur",
+        ):
+            self.assertIn(key, first)
+        for item in intervals:
+            self.assertAlmostEqual(
+                item["grid_export_kw"], item["pv_export_kw"] + item["battery_export_kw"]
+            )
+
     def test_defective_files_are_rejected_with_400(self) -> None:
         escaping = json.loads(self.sample.read_text(encoding="utf-8"))
         escaping["time_series_csv"] = "../outside.csv"
@@ -120,6 +149,48 @@ class ApiTests(unittest.TestCase):
         del files["time_series"]
         response = self.client.post("/api/v1/dispatch", files=files)
         self.assertEqual(response.status_code, 422)
+
+
+@unittest.skipUnless(_API_STACK_AVAILABLE, "the optional API dependencies are not installed")
+class WebPageTests(unittest.TestCase):
+    """The bundled static page rides on the API app without shadowing it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.client = TestClient(create_app())
+
+    def test_root_serves_the_dispatch_page(self) -> None:
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("PV-BESS dispatch explorer", response.text)
+        self.assertIn("app.js", response.text)
+
+    def test_static_assets_are_served_with_usable_types(self) -> None:
+        for path, expected_type, marker in (
+            ("/app.js", "javascript", "/api/v1/dispatch"),
+            ("/styles.css", "text/css", ".chart-svg"),
+            ("/favicon.svg", "image/svg+xml", "<svg"),
+        ):
+            with self.subTest(path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(expected_type, response.headers["content-type"])
+                self.assertIn(marker, response.text)
+
+    def test_static_mount_does_not_shadow_health_or_the_api(self) -> None:
+        health = self.client.get("/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["status"], "ok")
+        # A bare POST must reach FastAPI's upload validation (422 with details),
+        # not the static file tree (405 without them).
+        dispatch = self.client.post("/api/v1/dispatch")
+        self.assertEqual(dispatch.status_code, 422)
+        self.assertIn("detail", dispatch.json())
+
+    def test_unknown_path_is_a_plain_404(self) -> None:
+        response = self.client.get("/no-such-page")
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":  # pragma: no cover

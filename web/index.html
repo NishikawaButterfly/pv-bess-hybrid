@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Upload a PV-BESS scenario and its time series, run the dispatch optimization, and read the results as charts."
+    />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#0f2e1f" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <title>PV-BESS dispatch explorer</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to dispatch results</a>
+
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand" aria-label="PV-BESS dispatch explorer">
+          <span class="brand-mark" aria-hidden="true">PB</span>
+          <span>
+            <strong>PV-BESS Dispatch</strong>
+            <small>Scenario calculation explorer</small>
+          </span>
+        </div>
+        <div class="environment-badge">
+          <span aria-hidden="true">●</span> Scenario calculations, not forecasts
+        </div>
+      </div>
+    </header>
+
+    <main id="main-content" class="page-shell" tabindex="-1">
+      <section class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Solar-plus-storage dispatch</p>
+          <h1 id="page-title">Run a dispatch scenario and read the result as charts.</h1>
+          <p class="hero-copy">
+            Upload the scenario JSON and its hourly CSV, let the kernel solve the battery
+            dispatch, and inspect production, prices, battery flows, grid exchange, and the
+            financial summary for that one scenario.
+          </p>
+        </div>
+        <aside class="scope-notice" aria-labelledby="scope-title">
+          <div class="scope-icon" aria-hidden="true">i</div>
+          <div>
+            <h2 id="scope-title">Model scope</h2>
+            <p>
+              The scope is dispatch plus unlevered, pre-tax investment math. Results are
+              scenario calculations, not forecasts, grid-code studies, equipment
+              certifications, or investment advice.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="control-panel" aria-labelledby="run-title">
+        <div class="control-heading">
+          <div>
+            <p class="section-kicker">Scenario inputs</p>
+            <h2 id="run-title">Upload and run</h2>
+          </div>
+        </div>
+
+        <form id="dispatch-form" novalidate>
+          <div class="control-grid">
+            <div class="field">
+              <label for="scenario-input">Scenario JSON</label>
+              <input
+                id="scenario-input"
+                type="file"
+                accept=".json,application/json"
+                aria-describedby="scenario-help"
+                required
+              />
+              <p id="scenario-help" class="field-help">
+                The scenario file with battery, grid, and financial assumptions
+                (1&nbsp;MB limit).
+              </p>
+            </div>
+            <div class="field">
+              <label for="time-series-input">Time-series CSV</label>
+              <input
+                id="time-series-input"
+                type="file"
+                accept=".csv,text/csv"
+                aria-describedby="time-series-help"
+                required
+              />
+              <p id="time-series-help" class="field-help">
+                Header must be exactly timestamp,pv_power_kw,market_price_eur_per_mwh
+                (25&nbsp;MB limit).
+              </p>
+            </div>
+            <div class="run-actions">
+              <button id="run-button" class="button button-primary" type="submit" disabled>
+                <span aria-hidden="true">▶</span> Run dispatch
+              </button>
+              <p class="field-help">
+                Both files are posted to this server's /api/v1/dispatch endpoint; the solve
+                can take up to a couple of minutes.
+              </p>
+            </div>
+          </div>
+        </form>
+
+        <div id="status-panel" class="status-panel" role="status" aria-live="polite">
+          <span id="status-symbol" class="status-symbol" aria-hidden="true">—</span>
+          <div>
+            <strong id="status-title">Waiting for input files</strong>
+            <p id="status-detail">Choose a scenario JSON and its time-series CSV to enable the run.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="empty-state" class="empty-state" aria-labelledby="empty-title">
+        <div class="empty-diagram" aria-hidden="true">
+          <span>PV</span><i></i><b>BESS</b><i></i><span>GRID</span>
+        </div>
+        <h2 id="empty-title">No dispatch result yet</h2>
+        <p>Upload a scenario and its CSV, then run the dispatch to see charts and financial metrics.</p>
+      </section>
+
+      <div id="results" class="results" hidden>
+        <section class="results-heading" aria-labelledby="results-title">
+          <div>
+            <p class="section-kicker">Dispatch result</p>
+            <h2 id="results-title" tabindex="-1">Scenario outcome</h2>
+            <p id="result-summary" class="result-summary"></p>
+          </div>
+        </section>
+
+        <section class="kpi-grid" aria-label="Financial and dispatch metrics for this scenario">
+          <article class="kpi-card">
+            <p class="kpi-label">NPV</p>
+            <p id="metric-npv" class="kpi-value">—</p>
+            <p class="kpi-context">
+              Net present value of the battery increment, EUR, unlevered and pre-tax
+            </p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">IRR</p>
+            <p id="metric-irr" class="kpi-value">—</p>
+            <p class="kpi-context">
+              Internal rate of return of the incremental cash flows for this scenario
+            </p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">Simple payback</p>
+            <p id="metric-simple-payback" class="kpi-value">—</p>
+            <p class="kpi-context">Years of undiscounted cash flows to recover the capex</p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">Discounted payback</p>
+            <p id="metric-discounted-payback" class="kpi-value">—</p>
+            <p class="kpi-context">Years of discounted cash flows to recover the capex</p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">LCOS</p>
+            <p id="metric-lcos" class="kpi-value">—</p>
+            <p class="kpi-context">
+              Levelized cost of storage per discharged MWh, EUR/MWh
+            </p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">Curtailment reduction</p>
+            <p id="metric-curtailment" class="kpi-value">—</p>
+            <p class="kpi-context">
+              Versus the PV-only baseline, over the uploaded series only
+            </p>
+          </article>
+          <article class="kpi-card">
+            <p class="kpi-label">Equivalent full cycles</p>
+            <p id="metric-cycles" class="kpi-value">—</p>
+            <p class="kpi-context">
+              Battery cycles over the uploaded series, not per year
+            </p>
+          </article>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chart-pv-title">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Inputs</p>
+              <h2 id="chart-pv-title">PV production and market price</h2>
+            </div>
+          </div>
+          <figure class="chart-figure">
+            <div class="chart-frame">
+              <svg id="chart-pv" class="chart-svg" viewBox="0 0 960 380" role="img"></svg>
+            </div>
+            <figcaption id="chart-pv-legend" class="chart-legend-row"></figcaption>
+          </figure>
+          <details class="chart-data">
+            <summary>View PV production and price as a table</summary>
+            <div class="table-scroll" tabindex="0" aria-label="Scrollable PV production and price table">
+              <table id="chart-pv-table"></table>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chart-battery-title">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Battery</p>
+              <h2 id="chart-battery-title">Battery charge, discharge, and state of charge</h2>
+            </div>
+          </div>
+          <figure class="chart-figure">
+            <div class="chart-frame">
+              <svg id="chart-battery" class="chart-svg" viewBox="0 0 960 380" role="img"></svg>
+            </div>
+            <figcaption id="chart-battery-legend" class="chart-legend-row"></figcaption>
+          </figure>
+          <details class="chart-data">
+            <summary>View battery flows and state of charge as a table</summary>
+            <div class="table-scroll" tabindex="0" aria-label="Scrollable battery flows table">
+              <table id="chart-battery-table"></table>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chart-grid-title">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Point of connection</p>
+              <h2 id="chart-grid-title">Grid export, grid import, and curtailment</h2>
+            </div>
+          </div>
+          <figure class="chart-figure">
+            <div class="chart-frame">
+              <svg id="chart-grid" class="chart-svg" viewBox="0 0 960 380" role="img"></svg>
+            </div>
+            <figcaption id="chart-grid-legend" class="chart-legend-row"></figcaption>
+          </figure>
+          <details class="chart-data">
+            <summary>View grid exchange and curtailment as a table</summary>
+            <div class="table-scroll" tabindex="0" aria-label="Scrollable grid exchange table">
+              <table id="chart-grid-table"></table>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel" aria-labelledby="limitations-title">
+          <div class="panel-heading">
+            <div>
+              <p class="section-kicker">Read before quoting numbers</p>
+              <h2 id="limitations-title">Limitations</h2>
+            </div>
+          </div>
+          <ul id="limitations-list" class="limitations-list"></ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p>Scenario calculations only · No forecasts · No investment advice</p>
+    </footer>
+  </body>
+</html>
