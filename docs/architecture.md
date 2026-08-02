@@ -31,6 +31,11 @@ flowchart LR
 | `finance.py` | cash flows and investment metrics | dispatch decisions |
 | `io.py` | bounded input and failure-safe paired result publication | business formulas |
 | `cli.py` | user-facing orchestration and exit behavior | duplicated calculations |
+| `api.py` (optional) | HTTP transport for the same orchestration under `/api/v1` | calculations or validation rules |
+
+## API boundary
+
+`api.py` is an optional HTTP transport installed through the `api` extra and started with `pv-bess serve`. It stages the two uploaded files in a temporary directory and runs the exact `load_scenario`, `optimize_dispatch`, `evaluate_financials`, and `write_results` path the CLI runs, returning the resulting `summary.json` payload. Upload sizes are bounded by the same limits `io.py` enforces on disk, kernel errors map to 400 (defective file), 422 (well-formed file with impossible values), or 413 (oversized upload), and no calculation, validation rule, or state lives in the layer. FastAPI is imported nowhere outside `api.py`, so a kernel-only install remains web-free.
 
 ## Trust boundaries
 
@@ -45,7 +50,6 @@ The domain package has two runtime dependencies: NumPy for numerical vectors and
 
 ## Future boundaries
 
-- A future API will call the same domain functions and expose versioned resources under `/api/v1`.
 - PostgreSQL will persist scenario metadata and immutable result references, not solver internals.
 - Long-running annual scenarios will use jobs only after benchmarks define the synchronous envelope.
 - The Energy Asset Investment Lab may consume a versioned result bundle but will not import ORM models or share a database.
