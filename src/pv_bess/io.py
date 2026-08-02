@@ -56,6 +56,9 @@ _BATTERY_KEYS = {
     "charge_efficiency",
     "discharge_efficiency",
     "degradation_cost_eur_per_mwh_dc_discharged",
+    "calendar_fade_fraction_per_year",
+    "cycling_fade_fraction_per_efc",
+    "minimum_capacity_fraction",
 }
 _GRID_KEYS = {"export_limit_kw", "import_limit_kw", "allow_grid_charging"}
 _FINANCIAL_KEYS = {
@@ -235,6 +238,13 @@ def load_scenario(path: str | Path) -> tuple[Scenario, FinancialAssumptions]:
                 "degradation_cost_eur_per_mwh_dc_discharged",
                 0.0,
             ),
+            calendar_fade_fraction_per_year=_number(
+                battery_data, "calendar_fade_fraction_per_year", 0.0
+            ),
+            cycling_fade_fraction_per_efc=_number(
+                battery_data, "cycling_fade_fraction_per_efc", 0.0
+            ),
+            minimum_capacity_fraction=_number(battery_data, "minimum_capacity_fraction", 0.0),
         )
         grid = GridConfig(
             export_limit_kw=_number(grid_data, "export_limit_kw"),
@@ -382,6 +392,10 @@ def write_results(
         raise FileExistsError(f"refusing to overwrite {names}; pass --force to replace them")
 
     output.mkdir(parents=True, exist_ok=True)
+    financial_summary = asdict(financial)
+    if financial.capacity_fade is None:
+        # Without fade the summary keeps the schema of earlier releases exactly.
+        del financial_summary["capacity_fade"]
     payload = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "scenario_name": dispatch.scenario_name,
@@ -409,7 +423,7 @@ def write_results(
             "currency": "EUR",
         },
         "dispatch_summary": asdict(dispatch.summary),
-        "financial_summary": asdict(financial),
+        "financial_summary": financial_summary,
         "limitations": [
             "Results are scenario calculations, not a forecast or engineering certification.",
             "Financial metrics are unlevered and pre-tax.",

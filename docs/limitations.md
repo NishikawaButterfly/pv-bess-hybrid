@@ -5,7 +5,7 @@
 - One aggregated PV source, battery, and point of connection are modeled.
 - Power is treated as constant within each interval.
 - Network, inverter, transformer, auxiliary, and availability losses are absent except for directional battery efficiencies.
-- No ramp rate, reserve, minimum dwell time, calendar degradation, temperature dependence, or capacity replacement is modeled.
+- No ramp rate, reserve, minimum dwell time, temperature dependence, or capacity replacement is modeled. Calendar and cycling capacity fade exist in the financial layer only; the dispatch schedule never sees them.
 - Grid import is used only for battery charging; local load is not modeled.
 - Buy and sell prices use the same input series. Tariffs, imbalance, fees, taxes, and market access constraints are absent.
 
@@ -14,6 +14,7 @@
 - Cash flows are unlevered, pre-tax, and nominal.
 - The bundled examples (an annualized synthetic day and an annualized synthetic month) are calculation demonstrations, not investment cases.
 - LCOE is not implemented; LCOS follows the documented scenario convention.
+- Multi-year capacity fade scales the single representative dispatch. Dispatch is not re-solved per year: every project year reuses the same schedule multiplied by that year's capacity fraction, although a genuinely faded battery would reshape its schedule rather than shrink it uniformly, and cycling fade accrues at the year-one cycle count in every year. Re-solving each project year at reduced capacity is future work because even one full-year solve is already slow and unreliable on modest hardware; see [benchmarks.md](benchmarks.md).
 - IRR is intentionally omitted for absent or ambiguous conventional roots.
 - Debt, covenants, tax, grants, depreciation, replacements, salvage, and probabilistic analysis are deferred.
 

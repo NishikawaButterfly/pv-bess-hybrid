@@ -66,6 +66,11 @@ class BatteryConfig:
     charge_efficiency: float = 0.95
     discharge_efficiency: float = 0.95
     degradation_cost_eur_per_mwh_dc_discharged: float = 0.0
+    # Multi-year usable-capacity fade, expressed as fractions of the original
+    # usable energy. Zero keeps the pre-fade financial model and hashes intact.
+    calendar_fade_fraction_per_year: float = 0.0
+    cycling_fade_fraction_per_efc: float = 0.0
+    minimum_capacity_fraction: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("energy_capacity_kwh", "max_charge_power_kw", "max_discharge_power_kw"):
@@ -116,6 +121,15 @@ class BatteryConfig:
             self.degradation_cost_eur_per_mwh_dc_discharged,
             _MAX_ABSOLUTE_PRICE_EUR_PER_MWH,
         )
+        for name in (
+            "calendar_fade_fraction_per_year",
+            "cycling_fade_fraction_per_efc",
+            "minimum_capacity_fraction",
+        ):
+            value = getattr(self, name)
+            _require_finite(name, value)
+            if not 0 <= value < 1:
+                raise ValueError(f"{name} must be in [0, 1)")
 
     @property
     def resolved_terminal_soc_fraction(self) -> float:
@@ -338,6 +352,17 @@ class DispatchResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CapacityFadeSummary:
+    """Per-year usable-capacity trajectory derived from the battery fade parameters."""
+
+    calendar_fade_fraction_per_year: float
+    cycling_fade_fraction_per_efc: float
+    minimum_capacity_fraction: float
+    annualized_equivalent_full_cycles: float
+    capacity_fraction_by_year: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class FinancialResult:
     dispatch_input_sha256: str
     analysis_input_sha256: str
@@ -347,3 +372,4 @@ class FinancialResult:
     simple_payback_years: float | None
     discounted_payback_years: float | None
     lcos_eur_per_mwh: float | None
+    capacity_fade: CapacityFadeSummary | None

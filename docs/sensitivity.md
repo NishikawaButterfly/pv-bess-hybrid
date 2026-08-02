@@ -26,6 +26,8 @@ The spec is a small JSON file. Each supported parameter maps to either a list of
 | `discharge_efficiency` | battery discharge efficiency | multipliers or values |
 | `degradation_cost_eur_per_mwh_dc_discharged` | degradation reserve price | multipliers or values |
 
+Note that `degradation_cost_eur_per_mwh_dc_discharged` varies the per-MWh degradation reserve inside the dispatch objective only. It is distinct from the multi-year capacity fade parameters (`calendar_fade_fraction_per_year`, `cycling_fade_fraction_per_efc`), which scale later project years in the financial layer and are not part of the sensitivity set.
+
 The layer is one-at-a-time by design: every run changes a single parameter and there are no combination grids. At most 32 runs, including the base case, are accepted per spec. Unknown parameters, duplicate values, nonpositive multipliers, and variants that produce an invalid scenario (for example, an efficiency above one) are rejected with a clear error before anything is solved.
 
 ## Running it

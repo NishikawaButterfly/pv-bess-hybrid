@@ -79,6 +79,8 @@ class ExportXlsxCommandTests(unittest.TestCase):
             self.assertAlmostEqual(lcos_value, 265.9735362230494)
             self.assertEqual(lcos_unit, "EUR/MWh")
             self.assertEqual(items["Economic phase status"][0], "optimal")
+            # The sample scenario has no fade, so the section is absent.
+            self.assertNotIn("Calendar fade per year", items)
             column_a = [row[0].value for row in summary_sheet.iter_rows(min_col=1, max_col=1)]
             for limitation in self.summary["limitations"]:
                 self.assertIn(limitation, column_a)
@@ -150,6 +152,34 @@ class ExportXlsxCommandTests(unittest.TestCase):
             self.assertEqual(items["Curtailment reduction"][0], "n/a")
             self.assertEqual(items["Economic phase achieved MIP gap"][0], "n/a")
             self.assertTrue(str(items["Backend"][0]).endswith("unknown"))
+
+    @unittest.skipUnless(_OPENPYXL_AVAILABLE, _SKIP_REASON)
+    def test_capacity_fade_section_renders_when_present(self) -> None:
+        from openpyxl import load_workbook
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_copy = Path(directory) / "run"
+            shutil.copytree(self.run_directory, run_copy)
+            summary_path = run_copy / "summary.json"
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            payload["financial_summary"]["capacity_fade"] = {
+                "calendar_fade_fraction_per_year": 0.02,
+                "cycling_fade_fraction_per_efc": 0.004,
+                "minimum_capacity_fraction": 0.85,
+                "annualized_equivalent_full_cycles": 5.0,
+                "capacity_fraction_by_year": [1.0, 0.96, 0.92, 0.88],
+            }
+            summary_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            target = Path(directory) / "report.xlsx"
+            self.assertEqual(self._export(run_copy, target), 0)
+            items = self._summary_items(load_workbook(target)["Summary"])
+            self.assertAlmostEqual(items["Calendar fade per year"][0], 0.02)
+            self.assertAlmostEqual(items["Cycling fade per equivalent full cycle"][0], 0.004)
+            self.assertAlmostEqual(items["Minimum capacity fraction"][0], 0.85)
+            self.assertAlmostEqual(items["Annualized equivalent full cycles"][0], 5.0)
+            self.assertAlmostEqual(items["First-year capacity"][0], 1.0)
+            self.assertAlmostEqual(items["Final-year capacity (year 4)"][0], 0.88)
 
     @unittest.skipUnless(_OPENPYXL_AVAILABLE, _SKIP_REASON)
     def test_export_rejects_mismatched_provenance_hashes(self) -> None:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import math
 import unittest
+from dataclasses import replace
 
 from pv_bess.dispatch import optimize_dispatch
 from pv_bess.finance import evaluate_financials, internal_rate_of_return, net_present_value
 from pv_bess.models import BatteryConfig, FinancialAssumptions
+from pv_bess.provenance import scenario_sha256
 from tests.helpers import make_scenario
 
 
@@ -134,6 +136,125 @@ class FinanceTests(unittest.TestCase):
             without_haircut.lcos_eur_per_mwh or 0,
             with_haircut.lcos_eur_per_mwh or 0,
         )
+
+    def test_zero_fade_reproduces_the_unfaded_result_and_hashes_exactly(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        explicit = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.0,
+                cycling_fade_fraction_per_efc=0.0,
+                minimum_capacity_fraction=0.0,
+            ),
+        )
+        assumptions = FinancialAssumptions(1_000, 100, 5, 0.08, 365)
+        baseline = evaluate_financials(optimize_dispatch(scenario), scenario, assumptions)
+        explicit_result = evaluate_financials(optimize_dispatch(explicit), explicit, assumptions)
+        self.assertEqual(scenario_sha256(scenario), scenario_sha256(explicit))
+        self.assertEqual(baseline.analysis_input_sha256, explicit_result.analysis_input_sha256)
+        self.assertEqual(baseline.cash_flows_eur, explicit_result.cash_flows_eur)
+        self.assertEqual(baseline.npv_eur, explicit_result.npv_eur)
+        self.assertEqual(baseline.lcos_eur_per_mwh, explicit_result.lcos_eur_per_mwh)
+        self.assertIsNone(explicit_result.capacity_fade)
+
+    def test_capacity_fade_matches_the_documented_hand_table(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        faded = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.02,
+                cycling_fade_fraction_per_efc=0.004,
+                minimum_capacity_fraction=0.85,
+            ),
+        )
+        dispatch = optimize_dispatch(faded)
+        self.assertAlmostEqual(dispatch.summary.incremental_operating_value_eur, 99.0)
+        self.assertAlmostEqual(dispatch.summary.battery_discharge_energy_mwh, 1.0)
+        self.assertAlmostEqual(dispatch.summary.equivalent_full_cycles, 0.5)
+
+        result = evaluate_financials(
+            dispatch,
+            faded,
+            FinancialAssumptions(
+                capex_eur=1_000,
+                annual_fixed_opex_eur=0,
+                project_life_years=4,
+                discount_rate_fraction=0.0,
+                annualization_factor=10,
+            ),
+        )
+        fade = result.capacity_fade
+        assert fade is not None
+        self.assertAlmostEqual(fade.annualized_equivalent_full_cycles, 5.0)
+        # The docs/methodology.md worked table: year, capacity fraction, benefit,
+        # discharged MWh (discharged energy is 10 MWh times the fraction).
+        expected_rows = ((1.0, 990.0), (0.96, 950.4), (0.92, 910.8), (0.88, 871.2))
+        for year, (fraction, benefit_eur) in enumerate(expected_rows, start=1):
+            self.assertAlmostEqual(fade.capacity_fraction_by_year[year - 1], fraction)
+            self.assertAlmostEqual(result.cash_flows_eur[year], benefit_eur)
+        self.assertAlmostEqual(result.npv_eur, 2_722.40)
+        self.assertAlmostEqual(result.lcos_eur_per_mwh or 0, 1_037.60 / 37.60)
+
+    def test_capacity_fade_scales_lcos_cost_and_energy_together(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        faded = replace(
+            scenario,
+            battery=replace(scenario.battery, calendar_fade_fraction_per_year=0.03),
+        )
+        # Fade never changes the dispatch problem, so one solved dispatch serves
+        # both the faded and the unfaded evaluation.
+        dispatch = optimize_dispatch(scenario)
+        without_capex = FinancialAssumptions(0, 0, 10, 0.08, 365)
+        unfaded = evaluate_financials(dispatch, scenario, without_capex)
+        with_fade = evaluate_financials(dispatch, faded, without_capex)
+        # With no CAPEX or fixed OPEX the variable cost per discharged MWh is
+        # constant, so a consistently scaled numerator and denominator leave the
+        # ratio unchanged while every faded year costs and discharges less.
+        self.assertAlmostEqual(unfaded.lcos_eur_per_mwh or 0, with_fade.lcos_eur_per_mwh or 0)
+
+        with_capex = FinancialAssumptions(1_000, 0, 10, 0.08, 365)
+        self.assertGreater(
+            evaluate_financials(dispatch, faded, with_capex).lcos_eur_per_mwh or 0,
+            evaluate_financials(dispatch, scenario, with_capex).lcos_eur_per_mwh or 0,
+        )
+
+    def test_capacity_fade_changes_the_analysis_hash_but_not_the_dispatch_hash(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        faded = replace(
+            scenario,
+            battery=replace(scenario.battery, cycling_fade_fraction_per_efc=0.001),
+        )
+        self.assertEqual(scenario_sha256(scenario), scenario_sha256(faded))
+        dispatch = optimize_dispatch(scenario)
+        assumptions = FinancialAssumptions(1_000, 100, 5, 0.08, 365)
+        plain = evaluate_financials(dispatch, scenario, assumptions)
+        with_fade = evaluate_financials(dispatch, faded, assumptions)
+        self.assertNotEqual(plain.analysis_input_sha256, with_fade.analysis_input_sha256)
+        self.assertNotEqual(plain.npv_eur, with_fade.npv_eur)
+
+    def test_fade_crossing_the_capacity_floor_is_rejected(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        # 0.04 per year reaches 0.84 in year 5, below the 0.85 floor.
+        floored = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.04,
+                minimum_capacity_fraction=0.85,
+            ),
+        )
+        dispatch = optimize_dispatch(scenario)
+        with self.assertRaisesRegex(ValueError, "minimum_capacity_fraction"):
+            evaluate_financials(dispatch, floored, FinancialAssumptions(1_000, 0, 5, 0.08))
+        # The default floor of zero still rejects capacity below zero.
+        negative = replace(
+            scenario,
+            battery=replace(scenario.battery, calendar_fade_fraction_per_year=0.2),
+        )
+        with self.assertRaisesRegex(ValueError, "below the validated"):
+            evaluate_financials(dispatch, negative, FinancialAssumptions(1_000, 0, 7, 0.08))
 
 
 if __name__ == "__main__":  # pragma: no cover
