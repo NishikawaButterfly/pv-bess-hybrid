@@ -20,6 +20,7 @@ The original prototype mixed dispatch, electrical design, thermal estimates, equ
 - Solves battery dispatch as a mixed-integer program via `scipy.optimize.milp` (HiGHS backend). The model covers PV export, PV and optional grid charging, battery export, curtailment, and SOC accounting with separate charge and discharge efficiencies, all under shared grid limits. A second solve then minimizes battery throughput without changing the economic optimum.
 - Compares against a PV-only baseline and reports curtailment reduction, market value, a degradation reserve, and equivalent full cycles.
 - Turns the incremental operating value into cash flows and computes NPV, IRR, simple and discounted payback, and LCOS.
+- Reruns a scenario over bounded one-at-a-time sensitivities (price level, battery size and power, efficiency, degradation cost) and tabulates the financial metrics per variant.
 - Writes SHA-256 hashes of its inputs and the solver metadata into the output, so a run can be checked later.
 
 The full detail lives in [docs/methodology.md](docs/methodology.md) and [docs/architecture.md](docs/architecture.md).
@@ -67,6 +68,17 @@ pv-bess run --scenario sample-data/scenario.json --output results/sample
 ```
 
 This writes `summary.json` (provenance, solver metadata, units, KPIs, cash flows) and `dispatch.csv` (per-interval flows, SOC, market value, degradation cost). Existing files are not overwritten unless you pass `--force`.
+
+To see how the result moves when one input changes, run the bounded sensitivity layer:
+
+```bash
+pv-bess sensitivity \
+  --scenario sample-data/scenario.json \
+  --spec sample-data/sensitivity-spec.json \
+  --output results/sensitivity
+```
+
+It writes `sensitivity.json` and a flat `sensitivity.csv` with one row per variant, each carrying its own input hashes. See [docs/sensitivity.md](docs/sensitivity.md) for the spec format and a worked example.
 
 The bundled sample is a synthetic 24-hour day annualized with an explicit factor of 365. It demonstrates the calculation flow and nothing more; see [`sample-data/README.md`](sample-data/README.md). A larger deterministic fixture, a synthetic 744-hour month, lives in [`sample-data/monthly/`](sample-data/monthly/README.md); measured solver timings per horizon are published in [docs/benchmarks.md](docs/benchmarks.md).
 
@@ -127,7 +139,7 @@ src/pv_bess/        models, dispatch MILP, finance, I/O, CLI, provenance, option
 tests/              unit tests
 tools/              deterministic fixture generator
 web/                static results page served by the optional API
-docs/               data contract, methodology, limitations, benchmarks, threat model
+docs/               data contract, methodology, sensitivity, limitations, benchmarks, threat model
 legacy/             migration note about the retired prototype
 ```
 

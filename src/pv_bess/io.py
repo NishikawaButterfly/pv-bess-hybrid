@@ -23,8 +23,15 @@ from pv_bess.models import (
     IntervalInput,
     Scenario,
 )
+from pv_bess.sensitivity import (
+    SensitivityResult,
+    SensitivitySpec,
+    SensitivitySpecError,
+    parse_sensitivity_spec,
+)
 
 _MAX_SCENARIO_BYTES = 1_000_000
+_MAX_SENSITIVITY_SPEC_BYTES = 100_000
 _MAX_TIME_SERIES_BYTES = 25_000_000
 _MAX_INTERVALS = 100_000
 _CSV_COLUMNS = ("timestamp", "pv_power_kw", "market_price_eur_per_mwh")
@@ -261,6 +268,20 @@ def load_scenario(path: str | Path) -> tuple[Scenario, FinancialAssumptions]:
     return scenario, financial
 
 
+def load_sensitivity_spec(path: str | Path) -> SensitivitySpec:
+    """Load a bounded one-at-a-time sensitivity spec without side effects."""
+
+    spec_path = Path(path).resolve()
+    try:
+        payload = json.loads(
+            _read_bounded_text(spec_path, _MAX_SENSITIVITY_SPEC_BYTES),
+            object_pairs_hook=_unique_json_object,
+        )
+    except json.JSONDecodeError as exc:
+        raise SensitivitySpecError(f"invalid sensitivity spec JSON: {exc}") from exc
+    return parse_sensitivity_spec(payload)
+
+
 def _stage_text(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -450,3 +471,82 @@ def write_results(
         )
     )
     return summary_path, dispatch_path
+
+
+def write_sensitivity_results(
+    output_directory: str | Path,
+    result: SensitivityResult,
+    *,
+    force: bool = False,
+) -> tuple[Path, Path]:
+    """Publish a failure-safe sensitivity table pair, refusing silent overwrite."""
+
+    output = Path(output_directory).resolve()
+    json_path = output / "sensitivity.json"
+    csv_path = output / "sensitivity.csv"
+    existing_targets = [path for path in (json_path, csv_path) if path.exists()]
+    if existing_targets and not force:
+        names = ", ".join(path.name for path in existing_targets)
+        raise FileExistsError(f"refusing to overwrite {names}; pass --force to replace them")
+
+    output.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at_utc": datetime.now(UTC).isoformat(),
+        "scenario_name": result.scenario_name,
+        "base_dispatch_input_sha256": result.base.dispatch_input_sha256,
+        "base_analysis_input_sha256": result.base.analysis_input_sha256,
+        "schema_version": result.schema_version,
+        "model_version": result.model_version,
+        "solver": {
+            "interface_name": result.solver_interface_name,
+            "interface_version": result.solver_interface_version,
+            "backend_name": result.solver_backend_name,
+            "backend_version": result.solver_backend_version,
+            "requested_relative_mip_gap": result.requested_relative_mip_gap,
+            "time_limit_seconds_per_phase": result.time_limit_seconds_per_phase,
+        },
+        "units": {
+            "market_value": "EUR",
+            "npv": "EUR",
+            "irr": "fraction per year",
+            "payback": "years",
+            "lcos": "EUR/MWh",
+        },
+        "run_count": 1 + len(result.variants),
+        "base": asdict(result.base),
+        "variants": [asdict(item) for item in result.variants],
+        "limitations": [
+            "Each variant changes exactly one parameter; combined effects are not additive.",
+            "Results are scenario calculations, not a forecast or investment advice.",
+        ],
+    }
+    json_content = json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n"
+
+    fieldnames = [
+        "label",
+        "parameter",
+        "mode",
+        "value",
+        "dispatch_input_sha256",
+        "analysis_input_sha256",
+        "market_value_eur",
+        "npv_eur",
+        "irr_fraction",
+        "simple_payback_years",
+        "discounted_payback_years",
+        "lcos_eur_per_mwh",
+    ]
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", newline="") as buffer:
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for run in (result.base, *result.variants):
+            writer.writerow(asdict(run))
+        buffer.seek(0)
+        csv_content = buffer.read()
+    _publish_text_pair(
+        (
+            (json_path, json_content),
+            (csv_path, csv_content),
+        )
+    )
+    return json_path, csv_path

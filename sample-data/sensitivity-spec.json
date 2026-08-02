@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "parameters": {
+    "market_price_level": { "multipliers": [0.8, 1.2] },
+    "energy_capacity_kwh": { "multipliers": [0.5, 1.5] },
+    "degradation_cost_eur_per_mwh_dc_discharged": { "values": [0, 20] }
+  }
+}
