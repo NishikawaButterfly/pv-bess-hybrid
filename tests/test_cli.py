@@ -6,11 +6,16 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import find_spec
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from pv_bess.cli import main
+
+_SERVE_STACK_AVAILABLE = all(
+    find_spec(name) is not None for name in ("fastapi", "uvicorn")
+) and any(find_spec(name) is not None for name in ("python_multipart", "multipart"))
 
 
 class CommandLineTests(unittest.TestCase):
@@ -95,6 +100,27 @@ class CommandLineTests(unittest.TestCase):
                     "0",
                 ]
             )
+
+    def test_serve_without_api_dependencies_reports_a_clear_error(self) -> None:
+        with (
+            patch.dict(sys.modules, {"uvicorn": None}),
+            self.assertRaisesRegex(SystemExit, r"pip install 'pv-bess-hybrid\[api\]'"),
+        ):
+            main(["serve"])
+
+    def test_serve_rejects_an_out_of_range_port(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "port must be between"):
+            main(["serve", "--port", "70000"])
+
+    @unittest.skipUnless(_SERVE_STACK_AVAILABLE, "the optional API dependencies are not installed")
+    def test_serve_runs_uvicorn_with_the_requested_binding(self) -> None:
+        import uvicorn
+
+        with patch.object(uvicorn, "run") as run:
+            status = main(["serve", "--host", "127.0.0.1", "--port", "8123"])
+        self.assertEqual(status, 0)
+        self.assertEqual(run.call_args.kwargs["host"], "127.0.0.1")
+        self.assertEqual(run.call_args.kwargs["port"], 8123)
 
     def test_missing_subcommand_uses_argparse_failure(self) -> None:
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as raised:
