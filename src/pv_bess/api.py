@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import tempfile
 from importlib import metadata
 from pathlib import Path
@@ -27,7 +28,18 @@ from pv_bess.models import MODEL_VERSION, SCHEMA_VERSION, IntervalDispatch
 
 _READ_CHUNK_BYTES = 65_536
 _FALLBACK_TIME_SERIES_NAME = "time_series.csv"
-_WEB_DIRECTORY = Path(__file__).resolve().parents[2] / "web"
+
+
+def _resolve_web_directory() -> Path:
+    """Installed packages lose the source tree, so allow an explicit override."""
+
+    override = os.environ.get("PV_BESS_WEB_DIR")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parents[2] / "web"
+
+
+_WEB_DIRECTORY = _resolve_web_directory()
 
 # Windows can map .js and .css to other types through the registry, and the
 # browser then refuses to apply them. Pin the types the bundled page uses.

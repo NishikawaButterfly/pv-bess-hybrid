@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
+import unittest.mock
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -152,6 +154,22 @@ class ApiTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_API_STACK_AVAILABLE, "the optional API dependencies are not installed")
+class WebDirectoryOverrideTests(unittest.TestCase):
+    def test_environment_override_wins(self) -> None:
+        import pv_bess.api as api_module
+
+        with unittest.mock.patch.dict("os.environ", {"PV_BESS_WEB_DIR": "/somewhere/else"}):
+            self.assertEqual(api_module._resolve_web_directory(), Path("/somewhere/else"))
+
+    def test_source_layout_is_the_default(self) -> None:
+        import pv_bess.api as api_module
+
+        with unittest.mock.patch.dict("os.environ", clear=False):
+            os.environ.pop("PV_BESS_WEB_DIR", None)
+            resolved = api_module._resolve_web_directory()
+        self.assertTrue(str(resolved).endswith("web"))
+
+
 class WebPageTests(unittest.TestCase):
     """The bundled static page rides on the API app without shadowing it."""
 

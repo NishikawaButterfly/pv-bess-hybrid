@@ -17,6 +17,8 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt -r requirements-api.txt \
     && python -m pip install .
 
+ENV PV_BESS_WEB_DIR=/app/web
+
 USER app
 
 EXPOSE 8000
