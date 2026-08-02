@@ -80,6 +80,24 @@ Timestamps are interval starts with an explicit UTC offset, and the intervals ha
 
 See the [data contract](docs/data-contract.md) and the [validation notes](docs/validation.md).
 
+## API
+
+The same calculation is available over HTTP as an optional extra. The kernel does not depend on it; FastAPI is only imported by `pv_bess.api`.
+
+```bash
+python -m pip install -r requirements-api.txt
+python -m pip install --no-deps -e .
+pv-bess serve --host 127.0.0.1 --port 8000
+```
+
+(`pip install 'pv-bess-hybrid[api]'` works too.) `POST /api/v1/dispatch` takes the same two files the CLI reads and returns the `summary.json` payload; `GET /health` reports kernel and solver versions. Bad files get a 400, valid files with impossible values a 422, and uploads beyond the documented size limits a 413.
+
+```bash
+curl -F scenario=@sample-data/scenario.json \
+  -F time_series=@sample-data/hourly.csv \
+  http://127.0.0.1:8000/api/v1/dispatch
+```
+
 ## Tests
 
 If NumPy and SciPy are already installed, nothing else is needed:
@@ -99,17 +117,17 @@ CI additionally runs formatting, lint, strict typing, branch coverage, a package
 
 ```text
 sample-data/        fictional input fixture
-src/pv_bess/        models, dispatch MILP, finance, I/O, CLI, provenance
+src/pv_bess/        models, dispatch MILP, finance, I/O, CLI, provenance, optional API
 tests/              unit tests
 docs/               data contract, methodology, limitations, threat model
 legacy/             migration note about the retired prototype
 ```
 
-The library has no web framework or database dependency. An API or UI may come later, once the model itself has settled. See [architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-kernel-first.md).
+The library itself has no required web framework or database dependency; the HTTP layer is an optional extra on top of the unchanged kernel. See [architecture](docs/architecture.md) and [ADR 0001](docs/decisions/0001-kernel-first.md).
 
 ## What it doesn't do
 
-This is a dispatch model, nothing more. It does no electrical design — no protection, short-circuit, cable, transformer, EMF, or thermal calculations. It doesn't check grid-code compliance or certify equipment. There is no price forecasting and no live market connection. The financials ignore taxes, debt, and grants, and there is no probabilistic analysis. No API, no web interface, no multi-user anything: just the CLI.
+This is a dispatch model, nothing more. It does no electrical design — no protection, short-circuit, cable, transformer, EMF, or thermal calculations. It doesn't check grid-code compliance or certify equipment. There is no price forecasting and no live market connection. The financials ignore taxes, debt, and grants, and there is no probabilistic analysis. No web interface, no persistence, no multi-user anything: just the CLI and an optional single-process HTTP API.
 
 See [known limitations](docs/limitations.md) and the [roadmap](ROADMAP.md).
 

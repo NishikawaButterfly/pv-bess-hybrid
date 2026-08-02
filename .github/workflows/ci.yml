@@ -34,6 +34,7 @@ jobs:
       - name: Install locked direct dependencies
         run: |
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check -r requirements-api.txt
           python -m pip install --disable-pip-version-check --no-deps -e .
           python -m pip check
 
@@ -59,7 +60,7 @@ jobs:
           pv-bess validate --scenario sample-data/scenario.json
 
       - name: Audit runtime dependencies
-        run: pip-audit --requirement requirements.txt
+        run: pip-audit --requirement requirements.txt --requirement requirements-api.txt
 
   windows-smoke:
     name: Windows smoke

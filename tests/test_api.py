@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import json
+import unittest
+from importlib.util import find_spec
+from pathlib import Path
+
+from pv_bess.models import MODEL_VERSION, SCHEMA_VERSION
+
+
+def _api_test_stack_available() -> bool:
+    if any(find_spec(name) is None for name in ("fastapi", "httpx")):
+        return False
+    return any(find_spec(name) is not None for name in ("python_multipart", "multipart"))
+
+
+_API_STACK_AVAILABLE = _api_test_stack_available()
+
+if _API_STACK_AVAILABLE:
+    from fastapi.testclient import TestClient
+
+    from pv_bess.api import create_app
+
+
+@unittest.skipUnless(_API_STACK_AVAILABLE, "the optional API dependencies are not installed")
+class ApiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sample = Path(__file__).resolve().parents[1] / "sample-data" / "scenario.json"
+        cls.client = TestClient(create_app())
+
+    def _files(
+        self,
+        scenario_bytes: bytes | None = None,
+        time_series_bytes: bytes | None = None,
+    ) -> dict[str, tuple[str, bytes, str]]:
+        if scenario_bytes is None:
+            scenario_bytes = self.sample.read_bytes()
+        if time_series_bytes is None:
+            time_series_bytes = self.sample.with_name("hourly.csv").read_bytes()
+        return {
+            "scenario": ("scenario.json", scenario_bytes, "application/json"),
+            "time_series": ("hourly.csv", time_series_bytes, "text/csv"),
+        }
+
+    def test_health_reports_kernel_and_solver_versions(self) -> None:
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["schema_version"], SCHEMA_VERSION)
+        self.assertEqual(payload["model_version"], MODEL_VERSION)
+        self.assertEqual(payload["solver_interface_name"], "scipy.optimize.milp")
+        self.assertRegex(payload["solver_interface_version"], r"^\d+\.\d+")
+        self.assertEqual(payload["solver_backend_name"], "HiGHS")
+
+    def test_dispatch_returns_the_summary_the_cli_writes(self) -> None:
+        response = self.client.post("/api/v1/dispatch", files=self._files())
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload["dispatch_input_sha256"],
+            "76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491",
+        )
+        self.assertEqual(
+            payload["analysis_input_sha256"],
+            "c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8",
+        )
+        self.assertEqual(payload["solver"]["phases"]["economic"]["status"], "optimal")
+        self.assertEqual(payload["solver"]["phases"]["refinement"]["status"], "optimal")
+        self.assertAlmostEqual(payload["dispatch_summary"]["pv_energy_mwh"], 40.2)
+        self.assertAlmostEqual(payload["dispatch_summary"]["equivalent_full_cycles"], 0.45)
+        self.assertAlmostEqual(payload["financial_summary"]["npv_eur"], -3_818_737.07961859)
+        self.assertAlmostEqual(payload["financial_summary"]["lcos_eur_per_mwh"], 265.9735362230494)
+
+    def test_defective_files_are_rejected_with_400(self) -> None:
+        escaping = json.loads(self.sample.read_text(encoding="utf-8"))
+        escaping["time_series_csv"] = "../outside.csv"
+        header = b"timestamp,pv_power_kw,market_price_eur_per_mwh\n"
+        cases = (
+            ("malformed scenario JSON", b"{", None, "invalid scenario JSON"),
+            (
+                "escaping time series path",
+                json.dumps(escaping).encode("utf-8"),
+                None,
+                "stay inside",
+            ),
+            ("wrong CSV header", None, b"a,b,c\n1,2,3\n", "header must be exactly"),
+            ("invalid CSV row", None, header + b"not-a-timestamp,0,10\n", "invalid CSV row 2"),
+        )
+        for label, scenario_bytes, time_series_bytes, message in cases:
+            with self.subTest(label):
+                response = self.client.post(
+                    "/api/v1/dispatch",
+                    files=self._files(scenario_bytes, time_series_bytes),
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(message, response.json()["detail"])
+
+    def test_bad_scenario_value_is_rejected_with_422(self) -> None:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["battery"]["minimum_soc_fraction"] = 0.99
+        response = self.client.post(
+            "/api/v1/dispatch",
+            files=self._files(json.dumps(payload).encode("utf-8")),
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("minimum_soc_fraction", response.json()["detail"])
+
+    def test_oversized_scenario_upload_is_rejected_with_413(self) -> None:
+        response = self.client.post(
+            "/api/v1/dispatch",
+            files=self._files(scenario_bytes=b"x" * 1_000_001),
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("exceeds", response.json()["detail"])
+
+    def test_missing_upload_is_rejected_with_422(self) -> None:
+        files = self._files()
+        del files["time_series"]
+        response = self.client.post("/api/v1/dispatch", files=files)
+        self.assertEqual(response.status_code, 422)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

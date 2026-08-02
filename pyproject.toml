@@ -31,9 +31,15 @@ Repository = "https://github.com/NishikawaButterfly/pv-bess-hybrid"
 Issues = "https://github.com/NishikawaButterfly/pv-bess-hybrid/issues"
 
 [project.optional-dependencies]
+api = [
+  "fastapi>=0.110,<1",
+  "python-multipart>=0.0.9,<1",
+  "uvicorn>=0.30,<1",
+]
 dev = [
   "build>=1.2,<2",
   "coverage[toml]>=7.6,<8",
+  "httpx>=0.27,<1",
   "mypy>=1.14,<3",
   "pip-audit>=2.7,<3",
   "ruff>=0.9,<1",

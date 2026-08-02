@@ -29,6 +29,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--time-limit", type=float, default=60.0)
     run.add_argument("--mip-gap", type=float, default=1e-8)
     run.add_argument("--force", action="store_true")
+
+    serve = subparsers.add_parser("serve", help="serve the optional dispatch API over HTTP")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -36,8 +40,30 @@ def _fail(message: str) -> NoReturn:
     raise SystemExit(f"error: {message}")
 
 
+def _serve(host: str, port: int) -> int:
+    """Import the web stack lazily so a kernel-only install stays web-free."""
+
+    if not 0 <= port <= 65_535:
+        _fail("port must be between 0 and 65535")
+    try:
+        import uvicorn
+
+        from pv_bess.api import create_app
+
+        application = create_app()
+    except (ImportError, RuntimeError) as exc:
+        _fail(
+            "the API dependencies are not installed; install the 'api' extra "
+            f"(pip install 'pv-bess-hybrid[api]'): {exc}"
+        )
+    uvicorn.run(application, host=host, port=port)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "serve":
+        return _serve(args.host, args.port)
     try:
         scenario, financial_assumptions = load_scenario(args.scenario)
         if args.command == "validate":
