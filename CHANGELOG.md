@@ -6,6 +6,8 @@ All notable changes are documented here. The format follows Keep a Changelog and
 
 ### Added
 
+- optional multi-year battery capacity fade (`calendar_fade_fraction_per_year`, `cycling_fade_fraction_per_efc`, `minimum_capacity_fraction`): per-year capacity fractions scale operating benefit and discharged energy consistently across NPV and LCOS, surface in `summary.json`, the web page, and the Excel Summary sheet, and default to zero so existing scenarios, results, and hashes are byte-identical;
+
 - bounded one-at-a-time sensitivity layer (`pv-bess sensitivity`) with a JSON spec, a 32-run cap, per-variant input hashes, and paired `sensitivity.json`/`sensitivity.csv` outputs (`docs/sensitivity.md`);
 
 - `pv-bess export-xlsx`, an Excel export of a completed run directory (Summary, Cash flows, and Dispatch sheets) behind the optional `xlsx` extra;

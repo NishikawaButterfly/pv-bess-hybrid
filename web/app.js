@@ -45,6 +45,8 @@ const elements = {
   metricLcos: document.querySelector("#metric-lcos"),
   metricCurtailment: document.querySelector("#metric-curtailment"),
   metricCycles: document.querySelector("#metric-cycles"),
+  metricEolCard: document.querySelector("#metric-eol-card"),
+  metricEolCapacity: document.querySelector("#metric-eol-capacity"),
   limitationsList: document.querySelector("#limitations-list"),
 };
 
@@ -281,6 +283,15 @@ function renderMetrics(payload) {
   const cycles = asFiniteNumber(dispatch.equivalent_full_cycles);
   elements.metricCycles.textContent =
     cycles === null ? "—" : `${formatDecimal(cycles, 2)} cycles`;
+
+  // The capacity_fade block exists only when the scenario models multi-year fade.
+  const fade = isRecord(financial.capacity_fade) ? financial.capacity_fade : null;
+  const fractions =
+    fade && Array.isArray(fade.capacity_fraction_by_year) ? fade.capacity_fraction_by_year : [];
+  const endOfLife = fractions.length > 0 ? asFiniteNumber(fractions[fractions.length - 1]) : null;
+  elements.metricEolCard.hidden = endOfLife === null;
+  elements.metricEolCapacity.textContent =
+    endOfLife === null ? "—" : formatPercentFromFraction(endOfLife);
 }
 
 function renderLimitations(payload) {

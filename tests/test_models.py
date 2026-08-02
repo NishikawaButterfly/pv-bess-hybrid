@@ -103,6 +103,18 @@ class ModelValidationTests(unittest.TestCase):
                 {"degradation_cost_eur_per_mwh_dc_discharged": -1},
                 "greater than or equal",
             ),
+            (
+                "negative calendar fade",
+                {"calendar_fade_fraction_per_year": -0.01},
+                r"\[0, 1\)",
+            ),
+            ("cycling fade at one", {"cycling_fade_fraction_per_efc": 1}, r"\[0, 1\)"),
+            ("capacity floor at one", {"minimum_capacity_fraction": 1}, r"\[0, 1\)"),
+            (
+                "non-finite calendar fade",
+                {"calendar_fade_fraction_per_year": float("nan")},
+                "finite",
+            ),
         ]
         defaults = {
             "energy_capacity_kwh": 1_000,
@@ -115,6 +127,9 @@ class ModelValidationTests(unittest.TestCase):
             "charge_efficiency": 0.95,
             "discharge_efficiency": 0.95,
             "degradation_cost_eur_per_mwh_dc_discharged": 0,
+            "calendar_fade_fraction_per_year": 0,
+            "cycling_fade_fraction_per_efc": 0,
+            "minimum_capacity_fraction": 0,
         }
         for name, overrides, message in cases:
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):

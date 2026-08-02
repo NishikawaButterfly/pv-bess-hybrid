@@ -37,9 +37,11 @@ class InputOutputTests(unittest.TestCase):
         self.assertAlmostEqual(dispatch.summary.equivalent_full_cycles, 0.45)
         self.assertAlmostEqual(financial.npv_eur, -3_818_737.07961859)
         self.assertAlmostEqual(financial.lcos_eur_per_mwh or 0, 265.9735362230494)
+        self.assertIsNone(financial.capacity_fade)
         with tempfile.TemporaryDirectory() as directory:
             summary_path, dispatch_path = write_results(directory, dispatch, financial)
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertNotIn("capacity_fade", payload["financial_summary"])
             self.assertEqual(payload["dispatch_input_sha256"], dispatch.input_sha256)
             self.assertEqual(payload["analysis_input_sha256"], financial.analysis_input_sha256)
             self.assertEqual(payload["solver"]["phases"]["economic"]["status"], "optimal")
@@ -53,6 +55,35 @@ class InputOutputTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 write_results(directory, dispatch, financial)
             write_results(directory, dispatch, financial, force=True)
+
+    def test_battery_fade_keys_load_and_flow_into_the_summary(self) -> None:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["battery"]["calendar_fade_fraction_per_year"] = 0.01
+        payload["battery"]["cycling_fade_fraction_per_efc"] = 0.0001
+        payload["battery"]["minimum_capacity_fraction"] = 0.6
+        csv_content = self.sample.with_name("hourly.csv").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(csv_content, encoding="utf-8")
+            scenario, assumptions = load_scenario(scenario_path)
+            self.assertEqual(scenario.battery.calendar_fade_fraction_per_year, 0.01)
+            self.assertEqual(scenario.battery.cycling_fade_fraction_per_efc, 0.0001)
+            self.assertEqual(scenario.battery.minimum_capacity_fraction, 0.6)
+
+            dispatch = optimize_dispatch(scenario)
+            financial = evaluate_financials(dispatch, scenario, assumptions)
+            self.assertIsNotNone(financial.capacity_fade)
+            summary_path, _ = write_results(directory_path / "results", dispatch, financial)
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        fade = summary["financial_summary"]["capacity_fade"]
+        self.assertEqual(fade["calendar_fade_fraction_per_year"], 0.01)
+        fractions = fade["capacity_fraction_by_year"]
+        self.assertEqual(len(fractions), 15)
+        self.assertEqual(fractions[0], 1.0)
+        self.assertLess(fractions[-1], 1.0)
+        self.assertGreaterEqual(fractions[-1], 0.6)
 
     def test_failed_pair_publish_restores_the_previous_artifacts(self) -> None:
         original_scenario, original_assumptions = load_scenario(self.sample)

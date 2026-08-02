@@ -11,7 +11,12 @@ from pv_bess.models import FinancialAssumptions, Scenario
 
 
 def scenario_payload(scenario: Scenario) -> dict[str, Any]:
-    """Return the complete calculation input as a JSON-compatible mapping."""
+    """Return the complete dispatch calculation input as a JSON-compatible mapping.
+
+    The multi-year fade parameters never change the dispatch problem, so they are
+    hashed by :func:`analysis_sha256` instead: two scenarios that differ only in
+    fade share one dispatch and therefore one dispatch-input hash.
+    """
 
     return {
         "name": scenario.name,
@@ -83,11 +88,21 @@ def financial_payload(assumptions: FinancialAssumptions) -> dict[str, Any]:
 def analysis_sha256(scenario: Scenario, assumptions: FinancialAssumptions) -> str:
     """Hash the dispatch scenario and all downstream financial assumptions together."""
 
+    payload: dict[str, Any] = {
+        "scenario": scenario_payload(scenario),
+        "financial": financial_payload(assumptions),
+    }
+    battery = scenario.battery
+    # Zero fade is exactly the pre-fade financial model, so the block is added
+    # only when fade is active and every earlier analysis hash stays valid.
+    if battery.calendar_fade_fraction_per_year != 0 or battery.cycling_fade_fraction_per_efc != 0:
+        payload["battery_fade"] = {
+            "calendar_fade_fraction_per_year": battery.calendar_fade_fraction_per_year,
+            "cycling_fade_fraction_per_efc": battery.cycling_fade_fraction_per_efc,
+            "minimum_capacity_fraction": battery.minimum_capacity_fraction,
+        }
     canonical = json.dumps(
-        {
-            "scenario": scenario_payload(scenario),
-            "financial": financial_payload(assumptions),
-        },
+        payload,
         allow_nan=False,
         ensure_ascii=True,
         separators=(",", ":"),

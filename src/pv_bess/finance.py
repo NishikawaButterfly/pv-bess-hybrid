@@ -6,7 +6,13 @@ from collections.abc import Sequence
 from itertools import pairwise
 from math import isfinite
 
-from pv_bess.models import DispatchResult, FinancialAssumptions, FinancialResult, Scenario
+from pv_bess.models import (
+    CapacityFadeSummary,
+    DispatchResult,
+    FinancialAssumptions,
+    FinancialResult,
+    Scenario,
+)
 from pv_bess.provenance import analysis_sha256, scenario_sha256
 
 
@@ -104,6 +110,47 @@ def _annual_lcos_inputs(
     return representative_cost_eur, dispatch.summary.battery_discharge_energy_mwh
 
 
+def _capacity_fade_schedule(
+    dispatch: DispatchResult,
+    scenario: Scenario,
+    assumptions: FinancialAssumptions,
+) -> CapacityFadeSummary | None:
+    """Return the per-year capacity trajectory, or ``None`` when no fade is configured.
+
+    The representative dispatch is never re-solved: every project year keeps the
+    year-one schedule scaled by its capacity fraction. Cycling fade accrues at the
+    year-one annualized equivalent full cycles for every year, a first-order
+    simplification that slightly overstates fade late in the project life.
+    """
+
+    battery = scenario.battery
+    if battery.calendar_fade_fraction_per_year == 0 and battery.cycling_fade_fraction_per_efc == 0:
+        return None
+    annualized_efc = dispatch.summary.equivalent_full_cycles * assumptions.annualization_factor
+    fade_per_year = (
+        battery.calendar_fade_fraction_per_year
+        + battery.cycling_fade_fraction_per_efc * annualized_efc
+    )
+    fractions: list[float] = []
+    for year in range(1, assumptions.project_life_years + 1):
+        fraction = 1 - fade_per_year * (year - 1)
+        if fraction < battery.minimum_capacity_fraction:
+            raise ValueError(
+                f"the fade parameters drive the year-{year} capacity fraction to "
+                f"{fraction:.6g}, below the validated minimum_capacity_fraction of "
+                f"{battery.minimum_capacity_fraction:g}; reduce the fade parameters "
+                "or shorten project_life_years"
+            )
+        fractions.append(fraction)
+    return CapacityFadeSummary(
+        calendar_fade_fraction_per_year=battery.calendar_fade_fraction_per_year,
+        cycling_fade_fraction_per_efc=battery.cycling_fade_fraction_per_efc,
+        minimum_capacity_fraction=battery.minimum_capacity_fraction,
+        annualized_equivalent_full_cycles=annualized_efc,
+        capacity_fraction_by_year=tuple(fractions),
+    )
+
+
 def evaluate_financials(
     dispatch: DispatchResult,
     scenario: Scenario,
@@ -119,6 +166,14 @@ def evaluate_financials(
             "inventory valuation is not implemented"
         )
 
+    # A fraction of exactly 1.0 is a bit-exact multiplicative identity, so the
+    # no-fade path reproduces the pre-fade cash flows and LCOS byte for byte.
+    capacity_fade = _capacity_fade_schedule(dispatch, scenario, assumptions)
+    if capacity_fade is None:
+        capacity_fractions: tuple[float, ...] = (1.0,) * assumptions.project_life_years
+    else:
+        capacity_fractions = capacity_fade.capacity_fraction_by_year
+
     annual_incremental_value_eur = (
         dispatch.summary.incremental_operating_value_eur * assumptions.annualization_factor
     )
@@ -127,7 +182,7 @@ def evaluate_financials(
         performance = (1 - assumptions.annual_benefit_degradation_fraction) ** (year - 1)
         opex_factor = (1 + assumptions.annual_opex_escalation_fraction) ** (year - 1)
         cash_flows.append(
-            annual_incremental_value_eur * performance
+            annual_incremental_value_eur * capacity_fractions[year - 1] * performance
             - assumptions.annual_fixed_opex_eur * opex_factor
         )
 
@@ -136,17 +191,25 @@ def evaluate_financials(
     simple_payback_years = _payback_years(cash_flows, None)
     discounted_payback_years = _payback_years(cash_flows, assumptions.discount_rate_fraction)
 
+    # Both sides of the LCOS ratio follow the same per-year capacity trajectory
+    # as the NPV cash flows: a faded year costs less and discharges less alike.
     representative_cost_eur, representative_discharge_mwh = _annual_lcos_inputs(dispatch, scenario)
     discounted_cost_eur = assumptions.capex_eur
     discounted_discharge_mwh = 0.0
     for year in range(1, assumptions.project_life_years + 1):
+        capacity_fraction = capacity_fractions[year - 1]
         opex_factor = (1 + assumptions.annual_opex_escalation_fraction) ** (year - 1)
         discount_factor = (1 + assumptions.discount_rate_fraction) ** year
-        annual_variable_cost = representative_cost_eur * assumptions.annualization_factor
+        annual_variable_cost = (
+            representative_cost_eur * assumptions.annualization_factor * capacity_fraction
+        )
         annual_fixed_cost = assumptions.annual_fixed_opex_eur * opex_factor
         discounted_cost_eur += (annual_variable_cost + annual_fixed_cost) / discount_factor
         discounted_discharge_mwh += (
-            representative_discharge_mwh * assumptions.annualization_factor / discount_factor
+            representative_discharge_mwh
+            * assumptions.annualization_factor
+            * capacity_fraction
+            / discount_factor
         )
     lcos_eur_per_mwh = None
     if discounted_discharge_mwh > 1e-12:
@@ -161,4 +224,5 @@ def evaluate_financials(
         simple_payback_years=simple_payback_years,
         discounted_payback_years=discounted_payback_years,
         lcos_eur_per_mwh=lcos_eur_per_mwh,
+        capacity_fade=capacity_fade,
     )

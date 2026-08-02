@@ -20,6 +20,7 @@ The original prototype mixed dispatch, electrical design, thermal estimates, equ
 - Solves battery dispatch as a mixed-integer program via `scipy.optimize.milp` (HiGHS backend). The model covers PV export, PV and optional grid charging, battery export, curtailment, and SOC accounting with separate charge and discharge efficiencies, all under shared grid limits. A second solve then minimizes battery throughput without changing the economic optimum.
 - Compares against a PV-only baseline and reports curtailment reduction, market value, a degradation reserve, and equivalent full cycles.
 - Turns the incremental operating value into cash flows and computes NPV, IRR, simple and discounted payback, and LCOS.
+- Optionally models multi-year battery capacity fade (calendar aging plus cycling wear): each project year's operating benefit and discharged energy are scaled by the same per-year capacity fraction in both the NPV cash flows and the LCOS ratio, and a validated minimum-capacity floor rejects parameter sets that would cross it within the project life. The defaults are zero, so existing scenarios and their hashes are untouched; the dispatch schedule itself is not re-solved per year (see [docs/limitations.md](docs/limitations.md)).
 - Reruns a scenario over bounded one-at-a-time sensitivities (price level, battery size and power, efficiency, degradation cost) and tabulates the financial metrics per variant.
 - Writes SHA-256 hashes of its inputs and the solver metadata into the output, so a run can be checked later.
 

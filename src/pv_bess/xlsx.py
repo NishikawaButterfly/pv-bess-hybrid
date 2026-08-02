@@ -246,6 +246,46 @@ def _populate_summary_sheet(sheet: Any, summary: dict[str, Any]) -> None:
     for key, label, unit, number_format in _FINANCIAL_KPI_ROWS:
         writer.item(label, financial_summary[key], unit, number_format)
 
+    # Present only when the run modeled multi-year capacity fade; older
+    # summaries and zero-fade runs have no capacity_fade block.
+    capacity_fade = financial_summary.get("capacity_fade")
+    if isinstance(capacity_fade, dict):
+        fractions = capacity_fade["capacity_fraction_by_year"]
+        if not isinstance(fractions, list) or not fractions:
+            raise ValueError("capacity_fraction_by_year must be a non-empty array")
+        writer.section("Capacity fade")
+        writer.item(
+            "Calendar fade per year",
+            capacity_fade["calendar_fade_fraction_per_year"],
+            "fraction",
+            _FRACTION_FORMAT,
+        )
+        writer.item(
+            "Cycling fade per equivalent full cycle",
+            capacity_fade["cycling_fade_fraction_per_efc"],
+            "fraction",
+            _FRACTION_FORMAT,
+        )
+        writer.item(
+            "Minimum capacity fraction",
+            capacity_fade["minimum_capacity_fraction"],
+            "fraction",
+            _FRACTION_FORMAT,
+        )
+        writer.item(
+            "Annualized equivalent full cycles",
+            capacity_fade["annualized_equivalent_full_cycles"],
+            "cycles/year",
+            _SCALAR_FORMAT,
+        )
+        writer.item("First-year capacity", fractions[0], "fraction", _FRACTION_FORMAT)
+        writer.item(
+            f"Final-year capacity (year {len(fractions)})",
+            fractions[-1],
+            "fraction",
+            _FRACTION_FORMAT,
+        )
+
     writer.section("Limitations")
     for limitation in summary["limitations"]:
         writer.note(str(limitation))

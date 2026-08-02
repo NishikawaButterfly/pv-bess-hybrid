@@ -34,6 +34,8 @@ The interval duration is inferred in UTC from the first two timestamps. The last
 - charge efficiency: AC charging energy to stored DC energy;
 - discharge efficiency: stored DC energy to exported AC energy;
 - `degradation_cost_eur_per_mwh_dc_discharged`: economic reserve applied to DC energy removed from storage, not a physical degradation model;
+- `calendar_fade_fraction_per_year` and `cycling_fade_fraction_per_efc`: optional multi-year usable-capacity fade as fractions of the original usable energy per year and per equivalent full cycle; zero (the default) reproduces earlier results and hashes exactly;
+- `minimum_capacity_fraction`: validated capacity floor; financial evaluation fails with a clear error when the fade parameters imply crossing it within the project life;
 - terminal SOC defaults to initial SOC when omitted; financial evaluation requires equality until explicit inventory valuation is implemented.
 
 If only round-trip efficiency is known, it must not be copied into both directional fields. A derived split such as the square root requires an explicit documented assumption.
@@ -45,7 +47,7 @@ If only round-trip efficiency is known, it must not be copied into both directio
 - annual operating benefits occur at each year end;
 - the discount and escalation rates are fractions, not percentages;
 - `annualization_factor` explicitly scales the modeled period to one year;
-- `annual_benefit_degradation_fraction` is a financial haircut on incremental operating value only; it is not a battery capacity-fade model and does not alter LCOS energy;
+- `annual_benefit_degradation_fraction` is a financial haircut on incremental operating value only; it is not a battery capacity-fade model and does not alter LCOS energy. Physical fade is the battery's fade parameters, which scale each year's benefit, variable cost, and discharged energy together;
 - IRR is returned only for a conventional cash-flow sequence with exactly one sign change.
 
 ## Limits
