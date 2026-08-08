@@ -4,5 +4,5 @@ coverage==7.15.2
 httpx==0.28.1
 mypy==2.3.0
 pip-audit==2.10.1
-ruff==0.16.0
+ruff==0.16.1
 twine==7.0.0
