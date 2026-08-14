@@ -373,3 +373,6 @@ class FinancialResult:
     discounted_payback_years: float | None
     lcos_eur_per_mwh: float | None
     capacity_fade: CapacityFadeSummary | None
+    # Inputs that validated but are probably mistyped. Always present, so an
+    # empty tuple is a positive statement that the assumptions were checked.
+    warnings: tuple[str, ...] = ()

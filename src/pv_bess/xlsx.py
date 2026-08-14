@@ -286,6 +286,14 @@ def _populate_summary_sheet(sheet: Any, summary: dict[str, Any]) -> None:
             _FRACTION_FORMAT,
         )
 
+    # Absent from summaries published before the warning channel existed, and
+    # empty for a run whose assumptions raised nothing.
+    warnings = financial_summary.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        writer.section("Warnings")
+        for warning in warnings:
+            writer.note(str(warning))
+
     writer.section("Limitations")
     for limitation in summary["limitations"]:
         writer.note(str(limitation))

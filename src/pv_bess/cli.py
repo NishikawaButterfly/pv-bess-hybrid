@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
@@ -63,6 +64,13 @@ def _parser() -> argparse.ArgumentParser:
 
 def _fail(message: str) -> NoReturn:
     raise SystemExit(f"error: {message}")
+
+
+def _print_warnings(warnings: Sequence[str]) -> None:
+    """Print kernel warnings first, so they are not scrolled away by the paths."""
+
+    for warning in warnings:
+        print(f"warning: {warning}")
 
 
 def _serve(host: str, port: int) -> int:
@@ -138,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
                 relative_mip_gap=args.mip_gap,
             )
             json_path, csv_path = write_sensitivity_results(args.output, result, force=args.force)
+            _print_warnings(result.warnings)
             print(f"sensitivity_json: {json_path}")
             print(f"sensitivity_csv: {csv_path}")
             print(f"base_dispatch_input_sha256: {result.base.dispatch_input_sha256}")
@@ -153,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         summary_path, dispatch_path = write_results(
             args.output, dispatch, financial, force=args.force
         )
+        _print_warnings(financial.warnings)
         print(f"summary: {summary_path}")
         print(f"dispatch: {dispatch_path}")
         print(f"dispatch_input_sha256: {dispatch.input_sha256}")
