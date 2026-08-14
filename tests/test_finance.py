@@ -5,7 +5,13 @@ import unittest
 from dataclasses import replace
 
 from pv_bess.dispatch import optimize_dispatch
-from pv_bess.finance import evaluate_financials, internal_rate_of_return, net_present_value
+from pv_bess.finance import (
+    PERCENTAGE_LIKE_RATE_THRESHOLD,
+    assumption_warnings,
+    evaluate_financials,
+    internal_rate_of_return,
+    net_present_value,
+)
 from pv_bess.models import BatteryConfig, FinancialAssumptions
 from pv_bess.provenance import scenario_sha256
 from tests.helpers import make_scenario
@@ -233,6 +239,46 @@ class FinanceTests(unittest.TestCase):
         with_fade = evaluate_financials(dispatch, faded, assumptions)
         self.assertNotEqual(plain.analysis_input_sha256, with_fade.analysis_input_sha256)
         self.assertNotEqual(plain.npv_eur, with_fade.npv_eur)
+
+    def test_percentage_like_discount_rate_warns_and_still_returns_a_result(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        dispatch = optimize_dispatch(scenario)
+        result = evaluate_financials(
+            dispatch,
+            scenario,
+            FinancialAssumptions(1_000, 100, 15, 8.0, 365),
+        )
+        # A warning, never a refusal: the number is still calculated and returned.
+        self.assertIsInstance(result.npv_eur, float)
+        # Exactly one entry, although the run discounts fifteen years and the IRR
+        # search evaluates the same NPV function at many rates above the threshold.
+        self.assertEqual(len(result.warnings), 1)
+        warning = result.warnings[0]
+        self.assertIn("discount_rate_fraction", warning)
+        self.assertIn("8", warning)
+        self.assertIn("800%", warning)
+        self.assertIn("0.08", warning)
+
+    def test_ordinary_discount_rate_produces_no_warning(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        dispatch = optimize_dispatch(scenario)
+        for rate in (-0.95, 0.0, 0.08, 0.35):
+            with self.subTest(rate=rate):
+                result = evaluate_financials(
+                    dispatch,
+                    scenario,
+                    FinancialAssumptions(1_000, 100, 5, rate, 365),
+                )
+                self.assertEqual(result.warnings, ())
+
+    def test_discount_rate_warning_boundary_is_exactly_one(self) -> None:
+        self.assertEqual(PERCENTAGE_LIKE_RATE_THRESHOLD, 1.0)
+        base = FinancialAssumptions(1_000, 100, 5, 0.08, 365)
+        # 1.0 is a defensible 100% rate and stays silent; the next representable
+        # float above it is the first value the warning claims.
+        self.assertEqual(assumption_warnings(replace(base, discount_rate_fraction=1.0)), ())
+        above = math.nextafter(1.0, 2.0)
+        self.assertEqual(len(assumption_warnings(replace(base, discount_rate_fraction=above))), 1)
 
     def test_fade_crossing_the_capacity_floor_is_rejected(self) -> None:
         scenario = make_scenario([2_000, 0], [20, 100])

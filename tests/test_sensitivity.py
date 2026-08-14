@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -159,6 +160,18 @@ class SensitivityRunTests(unittest.TestCase):
         with self.assertRaisesRegex(SensitivitySpecError, "produces an invalid scenario"):
             run_sensitivity(self.scenario, self.assumptions, spec)
 
+    def test_shared_assumption_warnings_are_carried_once_for_the_whole_table(self) -> None:
+        spec = _spec({"market_price_level": {"multipliers": [0.8, 1.2]}})
+        ordinary = run_sensitivity(self.scenario, self.assumptions, spec)
+        self.assertEqual(ordinary.warnings, ())
+
+        mistyped = replace(self.assumptions, discount_rate_fraction=8.0)
+        result = run_sensitivity(self.scenario, mistyped, spec)
+        # One entry for the table, not one per run: every row shares the rate.
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("800%", result.warnings[0])
+        self.assertEqual(len(result.variants), 2)
+
 
 class SensitivityCommandLineTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -186,8 +199,10 @@ class SensitivityCommandLineTests(unittest.TestCase):
                 )
             self.assertEqual(status, 0)
             self.assertIn("base_analysis_input_sha256:", stdout.getvalue())
+            self.assertNotIn("warning:", stdout.getvalue())
 
             payload = json.loads((output / "sensitivity.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["warnings"], [])
             with (output / "sensitivity.csv").open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             self.assertEqual(payload["run_count"], 7)
@@ -208,6 +223,40 @@ class SensitivityCommandLineTests(unittest.TestCase):
             self.assertGreater(
                 by_label["market_price_level*1.2"]["npv_eur"], payload["base"]["npv_eur"]
             )
+
+    def test_cli_reports_the_shared_discount_rate_warning(self) -> None:
+        payload = json.loads(self.scenario.read_text(encoding="utf-8"))
+        payload["financial"]["discount_rate_fraction"] = 8
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(
+                self.scenario.with_name("hourly.csv").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            output = directory_path / "sensitivity"
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                status = main(
+                    [
+                        "sensitivity",
+                        "--scenario",
+                        str(scenario_path),
+                        "--spec",
+                        str(self.spec),
+                        "--output",
+                        str(output),
+                        "--time-limit",
+                        "10",
+                    ]
+                )
+            table = json.loads((output / "sensitivity.json").read_text(encoding="utf-8"))
+        self.assertEqual(status, 0)
+        self.assertIn("warning: discount_rate_fraction", stdout.getvalue())
+        self.assertIn("800%", stdout.getvalue())
+        self.assertEqual(len(table["warnings"]), 1)
+        self.assertIn("800%", table["warnings"][0])
 
     def test_cli_enforces_the_overwrite_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

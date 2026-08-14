@@ -18,8 +18,13 @@ belong together and both carry both provenance hashes.
 | `solver` | Interface and backend versions, requested gap, per-phase status, message, achieved gap, objective |
 | `units` | The unit of every reported quantity |
 | `dispatch_summary` | 15 dispatch KPIs |
-| `financial_summary` | Cash flows, NPV, IRR, both paybacks, LCOS, and `capacity_fade` when configured |
+| `financial_summary` | Cash flows, NPV, IRR, both paybacks, LCOS, `warnings`, and `capacity_fade` when configured |
 | `limitations` | Three sentences that should travel with any quoted figure |
+
+`financial_summary.warnings` is always present and usually empty. When it is not, it names
+an assumption that validated but is probably mistyped, and the Excel export renders it as a
+`Warnings` section on the Summary sheet. Treat a non-empty array as something to resolve
+before the figures leave your desk.
 
 `dispatch.csv` carries the 15 per-interval columns described in
 [chapter 12](12-reading-the-schedule.md), prefixed by the two hashes on every row.

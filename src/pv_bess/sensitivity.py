@@ -121,6 +121,9 @@ class SensitivityResult:
     time_limit_seconds_per_phase: float
     base: SensitivityRun
     variants: tuple[SensitivityRun, ...]
+    # Every run shares one set of financial assumptions, so the base run's
+    # warnings describe the whole table and are carried once, not per row.
+    warnings: tuple[str, ...] = ()
 
 
 def _number_list(entry: dict[str, Any], parameter: str, key: str) -> tuple[float, ...]:
@@ -300,4 +303,5 @@ def run_sensitivity(
         time_limit_seconds_per_phase=base_dispatch.time_limit_seconds_per_phase,
         base=base_run,
         variants=tuple(variant_runs),
+        warnings=base_financial.warnings,
     )

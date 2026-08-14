@@ -529,6 +529,9 @@ def write_sensitivity_results(
         "run_count": 1 + len(result.variants),
         "base": asdict(result.base),
         "variants": [asdict(item) for item in result.variants],
+        # One set of financial assumptions drives every row, so the warnings sit
+        # beside the table rather than being repeated in each run.
+        "warnings": list(result.warnings),
         "limitations": [
             "Each variant changes exactly one parameter; combined effects are not additive.",
             "Results are scenario calculations, not a forecast or investment advice.",

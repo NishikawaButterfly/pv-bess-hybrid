@@ -15,6 +15,14 @@ flows, in EUR.
 | Benefit timing | Year end, once per project year |
 | Discount rate | Your `discount_rate_fraction`, applied to year-end flows |
 
+`discount_rate_fraction` is a **fraction**: 8% is `0.08`, not `8`. The accepted range is
+`[-0.95, 10]`, which is wide enough that `8` — meaning 800% per year — validates and runs.
+Any value above `1.0` therefore produces a warning naming the value and how it was read.
+It is a warning and not a rejection: a rate above 100% is occasionally intended, and the
+model calculates whatever rate you give it. See
+[the discount rate as a percentage](04-data-contract-in-practice.md#a-discount-rate-entered-as-a-percentage)
+for the size of the error and where the warning appears.
+
 The cash-flow sequence is:
 
 ```text
@@ -107,8 +115,9 @@ Before you quote an NPV, three checks that take a minute and catch most errors:
 1. **Reconstruct year 1 by hand.** `incremental_operating_value_eur x annualization_factor
    - annual_fixed_opex_eur` must equal `cash_flows_eur[1]`. If it does not, you have
    misunderstood one of the fields.
-2. **Check the discount rate is below 1.** A rate entered as a percentage validates cleanly
-   and destroys the NPV — see
+2. **Read `warnings` before you read the NPV.** A rate entered as a percentage still
+   validates and still runs; what it no longer does is stay silent. An empty `warnings`
+   array means the assumptions were checked and nothing looked mistyped — see
    [chapter 4](04-data-contract-in-practice.md#a-discount-rate-entered-as-a-percentage).
 3. **Look at the last cash flow.** If it is negative while the first is positive, OPEX
    escalation has overtaken the degrading benefit, IRR will be withheld, and the project's

@@ -31,6 +31,21 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(payload["status"], "valid")
         self.assertEqual(payload["interval_count"], 24)
         self.assertEqual(len(payload["analysis_input_sha256"]), 64)
+        self.assertEqual(payload["warnings"], [])
+
+    def test_validate_warns_about_a_percentage_like_rate_before_solving(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_rate(Path(directory), 8)
+            output = StringIO()
+            with redirect_stdout(output):
+                status = main(["validate", "--scenario", str(scenario_path)])
+        self.assertEqual(status, 0)
+        # Still one JSON document on stdout: the warning must not break parsers.
+        payload = json.loads(output.getvalue())
+        self.assertEqual(status, 0)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(len(payload["warnings"]), 1)
+        self.assertIn("800%", payload["warnings"][0])
 
     def test_run_command_writes_results_and_enforces_overwrite_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -79,6 +94,53 @@ class CommandLineTests(unittest.TestCase):
                     ),
                     0,
                 )
+
+    def _scenario_with_rate(self, directory: Path, rate: float) -> Path:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["financial"]["discount_rate_fraction"] = rate
+        scenario_path = directory / "scenario.json"
+        scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+        (directory / "hourly.csv").write_text(
+            self.sample.with_name("hourly.csv").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return scenario_path
+
+    def test_percentage_like_discount_rate_is_reported_on_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = self._scenario_with_rate(directory_path, 8)
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                status = main(
+                    [
+                        "run",
+                        "--scenario",
+                        str(scenario_path),
+                        "--output",
+                        str(directory_path / "evidence"),
+                    ]
+                )
+        self.assertEqual(status, 0)
+        printed = stdout.getvalue()
+        self.assertIn("warning: discount_rate_fraction", printed)
+        self.assertIn("800%", printed)
+
+    def test_ordinary_discount_rate_prints_no_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                status = main(
+                    [
+                        "run",
+                        "--scenario",
+                        str(self.sample),
+                        "--output",
+                        str(Path(directory) / "evidence"),
+                    ]
+                )
+        self.assertEqual(status, 0)
+        self.assertNotIn("warning:", stdout.getvalue())
 
     def test_invalid_file_is_reported_as_cli_error(self) -> None:
         with self.assertRaisesRegex(SystemExit, "error: cannot access"):

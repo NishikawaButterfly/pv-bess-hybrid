@@ -15,9 +15,44 @@ from pv_bess.models import (
 )
 from pv_bess.provenance import analysis_sha256, scenario_sha256
 
+# A rate above 100% per year is legal and occasionally intended, so it is
+# warned about rather than refused. The value is the boundary itself: 1.0 is a
+# defensible 100% and stays silent.
+PERCENTAGE_LIKE_RATE_THRESHOLD = 1.0
+
+
+def assumption_warnings(assumptions: FinancialAssumptions) -> tuple[str, ...]:
+    """Return plain-language warnings about inputs that are valid but probably mistyped.
+
+    This is the single place warnings are produced. It is deliberately not part
+    of :func:`net_present_value`, which :func:`internal_rate_of_return` evaluates
+    at rates well above the threshold while bisecting, and not part of
+    :class:`~pv_bess.models.FinancialAssumptions` validation, which can only
+    accept or reject. Generating them here means every surface reads the same
+    tuple off :class:`~pv_bess.models.FinancialResult` instead of repeating the
+    judgment, so the text cannot diverge, duplicate, or be forgotten.
+    """
+
+    rate = assumptions.discount_rate_fraction
+    if rate <= PERCENTAGE_LIKE_RATE_THRESHOLD:
+        return ()
+    return (
+        f"discount_rate_fraction is {rate:g}, which the model read as "
+        f"{rate * 100:g}% per year; a value above "
+        f"{PERCENTAGE_LIKE_RATE_THRESHOLD:.1f} is usually a percentage entered as "
+        f"a fraction, and {rate:g}% would be {rate / 100:g}. NPV, discounted "
+        f"payback, and LCOS use {rate * 100:g}%.",
+    )
+
 
 def net_present_value(cash_flows_eur: Sequence[float], discount_rate_fraction: float) -> float:
-    """Return NPV with the first cash flow occurring at time zero."""
+    """Return NPV with the first cash flow occurring at time zero.
+
+    The upper bound is a conditioning guard, not a plausibility guard: it keeps
+    ``(1 + rate) ** period`` inside the float range for the longest supported
+    project life, and :func:`internal_rate_of_return` bisects up to it. Judging
+    whether a rate is plausible belongs to :func:`assumption_warnings`.
+    """
 
     if not isfinite(discount_rate_fraction) or not -0.95 <= discount_rate_fraction <= 10:
         raise ValueError("discount_rate_fraction must be finite and in [-0.95, 10]")
@@ -225,4 +260,5 @@ def evaluate_financials(
         discounted_payback_years=discounted_payback_years,
         lcos_eur_per_mwh=lcos_eur_per_mwh,
         capacity_fade=capacity_fade,
+        warnings=assumption_warnings(assumptions),
     )

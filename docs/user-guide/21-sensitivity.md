@@ -55,6 +55,10 @@ The base row's hashes match a plain `run` of the same scenario exactly — verif
 `76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491`. Every variant carries
 its own pair of hashes, so any single row can be reproduced as a standalone run.
 
+`sensitivity.json` also carries a `warnings` array. The financial assumptions are shared by
+every run — no supported parameter varies them — so a warning describes the whole table and
+is stored once beside it rather than repeated on each row.
+
 ## Reading the shipped example
 
 | Run | Market value | NPV | IRR | LCOS |

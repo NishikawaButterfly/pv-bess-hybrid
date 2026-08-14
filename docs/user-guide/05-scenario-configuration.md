@@ -137,9 +137,11 @@ its own sample. State the factor and its justification wherever you quote an ann
 
 ### `discount_rate_fraction` is a fraction
 
-`0.08` is 8%. `8` is 800% and is accepted without warning — see
+`0.08` is 8%. `8` is 800%, and it is accepted — the accepted range is `[-0.95, 10]` — but
+any value above `1.0` is reported as a warning by `validate`, by `run`, in `summary.json`,
+and in the API response. See
 [the data contract chapter](04-data-contract-in-practice.md#a-discount-rate-entered-as-a-percentage)
-for what that does to the output.
+for what that does to the output and why it warns instead of refusing.
 
 ### `annual_benefit_degradation_fraction` is not battery ageing
 
