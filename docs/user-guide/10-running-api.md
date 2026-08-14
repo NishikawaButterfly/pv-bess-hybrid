@@ -65,13 +65,18 @@ A 200 response carries the whole `summary.json` payload plus one addition:
 | `solver` | Interface and backend versions, requested gap, per-phase status |
 | `units` | The unit of every reported quantity |
 | `dispatch_summary` | The dispatch KPIs |
-| `financial_summary` | Cash flows and the financial metrics |
+| `financial_summary` | Cash flows, the financial metrics, and `warnings` |
 | `limitations` | The short limitations list |
 | `dispatch_intervals` | **The per-interval series, which the CLI puts in `dispatch.csv`** |
 
 `dispatch_intervals` is the API's one departure from the CLI's output shape, and it is the
 reason the web page can draw charts from a single request. The fields match `dispatch.csv`
 column for column, minus the two per-row hashes.
+
+`financial_summary.warnings` carries the same warnings the CLI prints, because the API
+returns the summary the CLI writes rather than building its own. A mistyped
+`discount_rate_fraction` therefore reaches an API caller as a 200 response whose
+`warnings` array is non-empty, not as an error. Read it before you read `npv_eur`.
 
 Verified against the sample: the API returns dispatch hash
 `76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491` and NPV

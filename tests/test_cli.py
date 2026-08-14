@@ -31,6 +31,21 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(payload["status"], "valid")
         self.assertEqual(payload["interval_count"], 24)
         self.assertEqual(len(payload["analysis_input_sha256"]), 64)
+        self.assertEqual(payload["warnings"], [])
+
+    def test_validate_warns_about_a_percentage_like_rate_before_solving(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_rate(Path(directory), 8)
+            output = StringIO()
+            with redirect_stdout(output):
+                status = main(["validate", "--scenario", str(scenario_path)])
+        self.assertEqual(status, 0)
+        # Still one JSON document on stdout: the warning must not break parsers.
+        payload = json.loads(output.getvalue())
+        self.assertEqual(status, 0)
+        self.assertEqual(payload["status"], "valid")
+        self.assertEqual(len(payload["warnings"]), 1)
+        self.assertIn("800%", payload["warnings"][0])
 
     def test_run_command_writes_results_and_enforces_overwrite_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

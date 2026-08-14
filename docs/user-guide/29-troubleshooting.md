@@ -51,7 +51,7 @@ noted.
 | `energy_capacity_kwh must be greater than zero` | Zero or negative capacity | Positive value |
 | `import_limit_kw must be positive when grid charging is enabled` | Flag on, no import capacity | Set an import limit, or turn the flag off |
 | `at least one grid limit must be greater than zero` | Both limits zero | Set at least one |
-| `discount_rate_fraction must be in [-0.95, 10]` | Rate far out of range | Use a fraction |
+| `discount_rate_fraction must be in [-0.95, 10]` | Rate far out of range | Use a fraction. Between 1 and 10 it is accepted and warned about, not rejected |
 | `annual_benefit_degradation_fraction must be in [0, 1)` | Percentage instead of fraction | `0.02`, not `2` |
 | `calendar_fade_fraction_per_year must be in [0, 1)` | Out of range | Use a fraction |
 
@@ -75,7 +75,8 @@ noted.
 
 | Symptom | Likely cause | Check |
 | --- | --- | --- |
-| **NPV absurdly negative, IRR ordinary** | `discount_rate_fraction` entered as a percentage | IRR does not depend on the discount rate, so this pattern is diagnostic. Verify the rate is below 1 |
+| **NPV absurdly negative, IRR ordinary** | `discount_rate_fraction` entered as a percentage | Read `warnings` first: any rate above 1.0 is named there. On an older result with no `warnings` field, the pattern itself is diagnostic, because IRR does not depend on the discount rate |
+| **NPV absurdly negative, no warning** | `annual_opex_escalation_fraction: 1` — "1%" typed as `1` — is 100% escalation per year and is inside its `[-0.95, 1]` range | Check the escalation rate by eye; nothing warns about this one |
 | **NPV meaninglessly negative** | Whole-plant CAPEX against battery-only benefit | `capex_eur` must be the battery increment |
 | **LCOS in the thousands** | Battery barely discharges | Read `battery_discharge_energy_mwh`; the battery may be too small or the spreads too thin |
 | **LCOS is `null`** | Battery never discharges | Expected. Check `equivalent_full_cycles` is 0 |

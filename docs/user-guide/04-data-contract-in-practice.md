@@ -140,7 +140,8 @@ pv-bess validate --scenario sample-data/scenario.json
   "interval_count": 24,
   "interval_hours": 1.0,
   "scenario": "Synthetic 5 MW PV plus 5 MW / 20 MWh BESS",
-  "status": "valid"
+  "status": "valid",
+  "warnings": []
 }
 ```
 
@@ -148,11 +149,16 @@ Read `interval_count` and `interval_hours` every time. They are the cheapest pos
 that the file you imported is the file you meant to import: a truncated CSV or a
 misinterpreted timestamp column shows up here instantly.
 
-## Two things validation does not catch
+Read `warnings` too. It is empty here, and an empty array is a positive statement that the
+assumptions were checked. When it is not empty it names an input that is inside its
+validated range but probably mistyped — see the discount rate below.
+
+## Two things `status: valid` does not mean
 
 `status: valid` means the files are well-formed and every value is individually within its
 domain. It does **not** mean the run will succeed, and it does not mean the values are
-sensible. Two cases are worth knowing by name.
+sensible. Two cases are worth knowing by name. Validation is silent about the first and
+warns about the second, but neither is refused.
 
 ### Terminal SOC that the financial layer will reject
 
@@ -180,27 +186,46 @@ as a rule you enforce yourself.
 
 `discount_rate_fraction` is a fraction, and its accepted range is `[-0.95, 10]`. The value
 `8`, meaning someone typed "8%" as `8`, is inside that range. It validates, it solves, and
-it produces a complete, confident, wrong answer:
+it changes the answer by orders of magnitude:
 
 | Figure | `discount_rate_fraction: 0.08` | `discount_rate_fraction: 8` |
 | --- | ---: | ---: |
-| NPV | EUR -3,467,411 | EUR -4,977,619 |
-| LCOS | EUR 262.14/MWh | EUR 12,760.82/MWh |
-| IRR | -0.0692 | -0.0692 |
+| NPV | EUR -3,818,737.08 | EUR -4,977,736.86 |
+| LCOS | EUR 265.97/MWh | EUR 12,760.90/MWh |
+| IRR | -0.1125 | -0.1125 |
 
-Nothing warns you. The tell is that **IRR is unchanged** — IRR does not depend on the
-discount rate — while NPV and LCOS move by orders of magnitude. If a scenario's LCOS looks
-absurd and its IRR looks ordinary, check the discount rate first.
+The run is no longer silent. Any rate above `1.0` produces a warning that names the value
+and how the model read it:
+
+```text
+warning: discount_rate_fraction is 8, which the model read as 800% per year; a value
+above 1.0 is usually a percentage entered as a fraction, and 8% would be 0.08. NPV,
+discounted payback, and LCOS use 800%.
+```
+
+`pv-bess validate` reports the same text in its `warnings` array, so you see it before
+paying for a solve. After a run, it appears in `summary.json` under
+`financial_summary.warnings` and in the API response, so it travels with the result rather
+than only with the terminal you ran it in.
+
+It is a warning and not a rejection, because a rate above 100% is occasionally intended and
+refusing it would be wrong. The number is still calculated at the rate you gave.
+
+If you meet an old result with no warning, the tell is that **IRR is unchanged** — IRR does
+not depend on the discount rate — while NPV and LCOS move by orders of magnitude. If a
+scenario's LCOS looks absurd and its IRR looks ordinary, check the discount rate first.
 
 The same fraction-versus-percentage trap exists for `annual_benefit_degradation_fraction`
-and `annual_opex_escalation_fraction`, though their tighter ranges catch most cases.
+and `annual_opex_escalation_fraction`. Their tighter ranges reject most cases, but
+`annual_opex_escalation_fraction: 1` — "1%" typed as `1` — is inside its `[-0.95, 1]` range
+and means 100% OPEX escalation per year. Nothing warns about that one yet; check it by eye.
 
 ## Practical habits
 
-1. Validate before every run, and read `interval_count` and `interval_hours`.
+1. Validate before every run, and read `interval_count`, `interval_hours`, and `warnings`.
 2. Keep the JSON and CSV together, and version them together.
 3. Record the dispatch hash with any result you circulate.
-4. Check `discount_rate_fraction < 1` by eye. It is the highest-consequence field with the
-   loosest guard.
+4. Check `discount_rate_fraction < 1` by eye anyway. The warning covers it, but the same
+   fraction-versus-percentage habit is what produces the other rate mistakes.
 5. Keep `terminal_soc_fraction` equal to `initial_soc_fraction`, or omit it entirely and
    let the default do it.

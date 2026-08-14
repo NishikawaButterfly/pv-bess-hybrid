@@ -44,13 +44,16 @@ pv-bess validate --scenario sample-data/scenario.json
   "interval_count": 24,
   "interval_hours": 1.0,
   "scenario": "Synthetic 5 MW PV plus 5 MW / 20 MWh BESS",
-  "status": "valid"
+  "status": "valid",
+  "warnings": []
 }
 ```
 
 Costs nothing, catches most input mistakes, and gives you the hashes before you commit to a
-long solve. Its two blind spots are covered in
-[the data contract chapter](04-data-contract-in-practice.md#two-things-validation-does-not-catch).
+long solve. `warnings` is empty when nothing looks mistyped; a non-empty array names an
+input that is inside its validated range but probably wrong, such as a discount rate
+entered as a percentage. What `status: valid` still does not promise is covered in
+[the data contract chapter](04-data-contract-in-practice.md#two-things-status-valid-does-not-mean).
 
 ## Run
 
@@ -67,10 +70,22 @@ dispatch_input_sha256: 76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d
 analysis_input_sha256: c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8
 ```
 
-The four lines are the complete output. Nothing is printed about the result itself — no
-NPV, no solver status, no warnings. To see any number you open `summary.json`. That the
-hashes appear here and in both artifacts is deliberate: it is what lets you tie a
-transcript to a file later.
+The four lines are the complete output for a clean run. No NPV, no solver status: to see
+any number you open `summary.json`. That the hashes appear here and in both artifacts is
+deliberate: it is what lets you tie a transcript to a file later.
+
+The one thing that is printed about the run itself is a warning, and only when there is
+one. Warnings come first, above the paths, so a long output does not scroll them away:
+
+```text
+warning: discount_rate_fraction is 8, which the model read as 800% per year; a value
+above 1.0 is usually a percentage entered as a fraction, and 8% would be 0.08. NPV,
+discounted payback, and LCOS use 800%.
+summary: ...\results\sample\summary.json
+```
+
+The same warnings are written to `summary.json` under `financial_summary.warnings`, so
+they survive the terminal.
 
 Measured wall clock on the guide's reference machine, including interpreter start-up:
 3.3 seconds for the 24-hour sample, 2.7 seconds for the 744-hour month.

@@ -41,7 +41,7 @@ def assumption_warnings(assumptions: FinancialAssumptions) -> tuple[str, ...]:
         f"{rate * 100:g}% per year; a value above "
         f"{PERCENTAGE_LIKE_RATE_THRESHOLD:.1f} is usually a percentage entered as "
         f"a fraction, and {rate:g}% would be {rate / 100:g}. NPV, discounted "
-        f"payback, and LCOS were calculated at {rate * 100:g}%.",
+        f"payback, and LCOS use {rate * 100:g}%.",
     )
 
 

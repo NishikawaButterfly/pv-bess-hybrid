@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
-from pv_bess.finance import evaluate_financials
+from pv_bess.finance import assumption_warnings, evaluate_financials
 from pv_bess.io import (
     ScenarioFileError,
     load_scenario,
@@ -129,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
                         "interval_hours": scenario.interval_hours,
                         "dispatch_input_sha256": scenario_sha256(scenario),
                         "analysis_input_sha256": analysis_sha256(scenario, financial_assumptions),
+                        # Inside the JSON document, not as a separate line:
+                        # validate speaks one parseable object and nothing else.
+                        "warnings": list(assumption_warnings(financial_assumptions)),
                     },
                     indent=2,
                     sort_keys=True,
