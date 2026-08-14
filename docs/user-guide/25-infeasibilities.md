@@ -86,21 +86,26 @@ alone can never make a scenario infeasible.
 
 ## Cause 4: a sensitivity variant
 
-The sensitivity layer names the offending variant, which is more helpful than the bare
-message:
-
-```text
-error: variant 'power_kw*0.1' : dispatch optimization failed with status 2: ...
-```
-
-A variant that reduces charge power or capacity can break a terminal target the base case
-met comfortably. Variants that produce an *invalid* scenario — an efficiency above one, for
-instance — are caught before any solve:
+Variants that produce an *invalid* scenario are caught before anything is solved, and the
+message names the offending variant:
 
 ```text
 error: variant 'charge_efficiency*1.1' produces an invalid scenario: charge_efficiency
 must be greater than zero and at most one
 ```
+
+A variant that made the *dispatch* infeasible would be reported the same way, with the
+variant label prefixed to the solver message. In practice this is nearly unreachable, and
+the reason is worth understanding: since the financial layer requires terminal SOC to equal
+initial SOC, an idle battery — every flow zero, all PV curtailed — always satisfies every
+constraint. So no reduction in capacity, power, or efficiency can make a financially valid
+scenario infeasible; the optimiser can always fall back on doing nothing. Reducing
+`power_kw` to 1% of its base value on a working scenario solves normally and simply reports
+a worse result.
+
+The corollary is a useful diagnostic: **if a scenario is infeasible, the cause is almost
+always a constraint the battery cannot satisfy by standing still** — which means the
+terminal SOC target.
 
 ## A diagnostic routine
 

@@ -31,7 +31,13 @@ Each parameter takes either `multipliers` (relative to the base value) or `value
 
 At most 32 runs including the base. Unknown parameters, duplicates, non-positive
 multipliers, and variants producing an invalid scenario are all rejected before anything is
-solved.
+solved, and the message lists what is supported:
+
+```text
+error: unknown sensitivity parameter 'capex_eur'; supported parameters: charge_efficiency,
+degradation_cost_eur_per_mwh_dc_discharged, discharge_efficiency, energy_capacity_kwh,
+market_price_level, power_kw
+```
 
 ## Running it
 
