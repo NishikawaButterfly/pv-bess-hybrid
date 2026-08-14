@@ -29,6 +29,8 @@ The original prototype mixed dispatch, electrical design, thermal estimates, equ
 
 The full detail lives in [docs/methodology.md](docs/methodology.md) and [docs/architecture.md](docs/architecture.md).
 
+If you are sizing a project rather than reading the formulation, start with the [user guide](docs/user-guide/README.md). Its thirty chapters walk from preparing PV and price data through configuring a scenario and running the dispatch to reading NPV, IRR, payback and LCOS without over-claiming, and they close with two worked examples, a troubleshooting catalogue, and a glossary. Every figure, error message and solver status in it was produced by running the software.
+
 ## Quick start
 
 Python 3.12 or 3.13 is supported.
