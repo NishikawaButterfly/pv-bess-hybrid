@@ -38,10 +38,14 @@ class InputOutputTests(unittest.TestCase):
         self.assertAlmostEqual(financial.npv_eur, -3_818_737.07961859)
         self.assertAlmostEqual(financial.lcos_eur_per_mwh or 0, 265.9735362230494)
         self.assertIsNone(financial.capacity_fade)
+        # The sample's rate of 0.08 is ordinary, so the warning channel is empty
+        # and every published figure above is unchanged by its existence.
+        self.assertEqual(financial.warnings, ())
         with tempfile.TemporaryDirectory() as directory:
             summary_path, dispatch_path = write_results(directory, dispatch, financial)
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertNotIn("capacity_fade", payload["financial_summary"])
+            self.assertEqual(payload["financial_summary"]["warnings"], [])
             self.assertEqual(payload["dispatch_input_sha256"], dispatch.input_sha256)
             self.assertEqual(payload["analysis_input_sha256"], financial.analysis_input_sha256)
             self.assertEqual(payload["solver"]["phases"]["economic"]["status"], "optimal")
@@ -84,6 +88,31 @@ class InputOutputTests(unittest.TestCase):
         self.assertEqual(fractions[0], 1.0)
         self.assertLess(fractions[-1], 1.0)
         self.assertGreaterEqual(fractions[-1], 0.6)
+
+    def test_percentage_like_discount_rate_warning_reaches_the_summary(self) -> None:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["financial"]["discount_rate_fraction"] = 8
+        csv_content = self.sample.with_name("hourly.csv").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(csv_content, encoding="utf-8")
+            scenario, assumptions = load_scenario(scenario_path)
+            dispatch = optimize_dispatch(scenario)
+            financial = evaluate_financials(dispatch, scenario, assumptions)
+            summary_path, _ = write_results(directory_path / "results", dispatch, financial)
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        # The rate never enters the dispatch problem, so the published dispatch
+        # anchor is untouched while the analysis hash and the figures move.
+        self.assertEqual(
+            summary["dispatch_input_sha256"],
+            "76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491",
+        )
+        warnings = summary["financial_summary"]["warnings"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("discount_rate_fraction", warnings[0])
+        self.assertIn("800%", warnings[0])
 
     def test_failed_pair_publish_restores_the_previous_artifacts(self) -> None:
         original_scenario, original_assumptions = load_scenario(self.sample)

@@ -74,6 +74,22 @@ class ApiTests(unittest.TestCase):
         self.assertAlmostEqual(payload["dispatch_summary"]["equivalent_full_cycles"], 0.45)
         self.assertAlmostEqual(payload["financial_summary"]["npv_eur"], -3_818_737.07961859)
         self.assertAlmostEqual(payload["financial_summary"]["lcos_eur_per_mwh"], 265.9735362230494)
+        self.assertEqual(payload["financial_summary"]["warnings"], [])
+
+    def test_percentage_like_discount_rate_warning_reaches_the_api(self) -> None:
+        scenario = json.loads(self.sample.read_text(encoding="utf-8"))
+        scenario["financial"]["discount_rate_fraction"] = 8
+        response = self.client.post(
+            "/api/v1/dispatch",
+            files=self._files(json.dumps(scenario).encode("utf-8")),
+        )
+        # A warning, not a rejection: the response is a complete 200 result.
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        warnings = payload["financial_summary"]["warnings"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("discount_rate_fraction", warnings[0])
+        self.assertIn("800%", warnings[0])
 
     def test_dispatch_includes_the_interval_series_for_charting(self) -> None:
         response = self.client.post("/api/v1/dispatch", files=self._files())
