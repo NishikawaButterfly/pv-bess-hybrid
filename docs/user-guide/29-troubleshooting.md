@@ -76,7 +76,7 @@ noted.
 | Symptom | Likely cause | Check |
 | --- | --- | --- |
 | **NPV absurdly negative, IRR ordinary** | `discount_rate_fraction` entered as a percentage | Read `warnings` first: any rate above 1.0 is named there. On an older result with no `warnings` field, the pattern itself is diagnostic, because IRR does not depend on the discount rate |
-| **NPV absurdly negative, no warning** | `annual_opex_escalation_fraction: 1` — "1%" typed as `1` — is 100% escalation per year and is inside its `[-0.95, 1]` range | Check the escalation rate by eye; nothing warns about this one |
+| **NPV absurdly negative, escalation warned** | `annual_opex_escalation_fraction` entered as a percentage — `1` is 100% escalation per year, inside its `[-0.95, 1]` range | Read `warnings` first: any escalation above 0.25 is named there. On an older result with no `warnings` field, check the escalation rate by eye |
 | **NPV meaninglessly negative** | Whole-plant CAPEX against battery-only benefit | `capex_eur` must be the battery increment |
 | **LCOS in the thousands** | Battery barely discharges | Read `battery_discharge_energy_mwh`; the battery may be too small or the spreads too thin |
 | **LCOS is `null`** | Battery never discharges | Expected. Check `equivalent_full_cycles` is 0 |

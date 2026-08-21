@@ -138,6 +138,36 @@ class ExportXlsxCommandTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(_OPENPYXL_AVAILABLE, _SKIP_REASON)
+    def test_percentage_like_opex_escalation_warning_reaches_the_workbook(self) -> None:
+        from openpyxl import load_workbook
+
+        sample = Path(__file__).resolve().parents[1] / "sample-data" / "scenario.json"
+        payload = json.loads(sample.read_text(encoding="utf-8"))
+        payload["financial"]["annual_opex_escalation_fraction"] = 1
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(
+                sample.with_name("hourly.csv").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            scenario, assumptions = load_scenario(scenario_path)
+            dispatch = optimize_dispatch(scenario)
+            financial = evaluate_financials(dispatch, scenario, assumptions)
+            run_directory = directory_path / "run"
+            write_results(run_directory, dispatch, financial)
+            target = directory_path / "report.xlsx"
+            self.assertEqual(self._export(run_directory, target), 0)
+            summary_sheet = load_workbook(target)["Summary"]
+            column_a = [row[0].value for row in summary_sheet.iter_rows(min_col=1, max_col=1)]
+        self.assertIn("Warnings", column_a)
+        self.assertTrue(
+            any(isinstance(value, str) and "100%" in value for value in column_a),
+            "the workbook must carry the warning text, not just the heading",
+        )
+
+    @unittest.skipUnless(_OPENPYXL_AVAILABLE, _SKIP_REASON)
     def test_workbook_metadata_stays_anonymous(self) -> None:
         from openpyxl import load_workbook
 

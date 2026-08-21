@@ -114,6 +114,31 @@ class InputOutputTests(unittest.TestCase):
         self.assertIn("discount_rate_fraction", warnings[0])
         self.assertIn("800%", warnings[0])
 
+    def test_percentage_like_opex_escalation_warning_reaches_the_summary(self) -> None:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["financial"]["annual_opex_escalation_fraction"] = 1
+        csv_content = self.sample.with_name("hourly.csv").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(csv_content, encoding="utf-8")
+            scenario, assumptions = load_scenario(scenario_path)
+            dispatch = optimize_dispatch(scenario)
+            financial = evaluate_financials(dispatch, scenario, assumptions)
+            summary_path, _ = write_results(directory_path / "results", dispatch, financial)
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        # The escalation never enters the dispatch problem, so the published
+        # dispatch anchor is untouched while the analysis hash and figures move.
+        self.assertEqual(
+            summary["dispatch_input_sha256"],
+            "76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491",
+        )
+        warnings = summary["financial_summary"]["warnings"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("annual_opex_escalation_fraction", warnings[0])
+        self.assertIn("100%", warnings[0])
+
     def test_failed_pair_publish_restores_the_previous_artifacts(self) -> None:
         original_scenario, original_assumptions = load_scenario(self.sample)
         original_dispatch = optimize_dispatch(original_scenario)

@@ -172,6 +172,16 @@ class SensitivityRunTests(unittest.TestCase):
         self.assertIn("800%", result.warnings[0])
         self.assertEqual(len(result.variants), 2)
 
+    def test_shared_opex_escalation_warning_is_carried_once_for_the_whole_table(self) -> None:
+        spec = _spec({"market_price_level": {"multipliers": [0.8, 1.2]}})
+        mistyped = replace(self.assumptions, annual_opex_escalation_fraction=1.0)
+        result = run_sensitivity(self.scenario, mistyped, spec)
+        # One entry for the table, not one per run: every row shares the escalation.
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("annual_opex_escalation_fraction", result.warnings[0])
+        self.assertIn("100%", result.warnings[0])
+        self.assertEqual(len(result.variants), 2)
+
 
 class SensitivityCommandLineTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -257,6 +267,40 @@ class SensitivityCommandLineTests(unittest.TestCase):
         self.assertIn("800%", stdout.getvalue())
         self.assertEqual(len(table["warnings"]), 1)
         self.assertIn("800%", table["warnings"][0])
+
+    def test_cli_reports_the_shared_opex_escalation_warning(self) -> None:
+        payload = json.loads(self.scenario.read_text(encoding="utf-8"))
+        payload["financial"]["annual_opex_escalation_fraction"] = 1
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = directory_path / "scenario.json"
+            scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+            (directory_path / "hourly.csv").write_text(
+                self.scenario.with_name("hourly.csv").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            output = directory_path / "sensitivity"
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                status = main(
+                    [
+                        "sensitivity",
+                        "--scenario",
+                        str(scenario_path),
+                        "--spec",
+                        str(self.spec),
+                        "--output",
+                        str(output),
+                        "--time-limit",
+                        "10",
+                    ]
+                )
+            table = json.loads((output / "sensitivity.json").read_text(encoding="utf-8"))
+        self.assertEqual(status, 0)
+        self.assertIn("warning: annual_opex_escalation_fraction", stdout.getvalue())
+        self.assertIn("100%", stdout.getvalue())
+        self.assertEqual(len(table["warnings"]), 1)
+        self.assertIn("100%", table["warnings"][0])
 
     def test_cli_enforces_the_overwrite_policy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

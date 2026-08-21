@@ -216,9 +216,13 @@ not depend on the discount rate — while NPV and LCOS move by orders of magnitu
 scenario's LCOS looks absurd and its IRR looks ordinary, check the discount rate first.
 
 The same fraction-versus-percentage trap exists for `annual_benefit_degradation_fraction`
-and `annual_opex_escalation_fraction`. Their tighter ranges reject most cases, but
-`annual_opex_escalation_fraction: 1` — "1%" typed as `1` — is inside its `[-0.95, 1]` range
-and means 100% OPEX escalation per year. Nothing warns about that one yet; check it by eye.
+and `annual_opex_escalation_fraction`. `annual_benefit_degradation_fraction` has a `[0, 1)`
+range that rejects a value of `1` outright. `annual_opex_escalation_fraction: 1` — "1%" typed
+as `1` — is inside its `[-0.95, 1]` range and means 100% OPEX escalation per year; that one
+is now warned about the same way, on any value above `0.25` (25% a year), which is already
+beyond any plausible sustained escalation of a fixed operating-cost line. The warning names
+the value and how it was read, and travels on the same `warnings` channel as the discount
+rate, so both can appear together when both are mistyped.
 
 ## Practical habits
 

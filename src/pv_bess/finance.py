@@ -20,6 +20,20 @@ from pv_bess.provenance import analysis_sha256, scenario_sha256
 # defensible 100% and stays silent.
 PERCENTAGE_LIKE_RATE_THRESHOLD = 1.0
 
+# The opex-escalation threshold is set on its own economic footing, not by
+# analogy with the discount rate. This field escalates a fixed operating-cost
+# line, which tracks general cost inflation: low-to-mid single digits in normal
+# conditions, and even a deliberately harsh inflationary stress case rarely
+# sustains more than about 20% a year over a project life. 25% a year already
+# compounds fixed OPEX to roughly 26x across a 15-year life, which no maintenance
+# budget plans for, so 0.25 is the highest escalation the model still treats as
+# plausible and leaves silent; anything above it is far more likely a percentage
+# (the classic "1" for 1%) typed into a fraction field. The ceiling is
+# deliberately tighter than the discount rate's 1.0: a 100% hurdle rate is an
+# extreme-but-conceivable cost of capital, whereas a 100% operating-cost
+# escalation is not, so the two are judged separately.
+PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD = 0.25
+
 
 def assumption_warnings(assumptions: FinancialAssumptions) -> tuple[str, ...]:
     """Return plain-language warnings about inputs that are valid but probably mistyped.
@@ -30,19 +44,34 @@ def assumption_warnings(assumptions: FinancialAssumptions) -> tuple[str, ...]:
     :class:`~pv_bess.models.FinancialAssumptions` validation, which can only
     accept or reject. Generating them here means every surface reads the same
     tuple off :class:`~pv_bess.models.FinancialResult` instead of repeating the
-    judgment, so the text cannot diverge, duplicate, or be forgotten.
+    judgment, so the text cannot diverge, duplicate, or be forgotten. Each
+    checked input contributes at most one entry, so a scenario that mistypes
+    several of them warns about each once, in a fixed order.
     """
 
+    warnings: list[str] = []
+
     rate = assumptions.discount_rate_fraction
-    if rate <= PERCENTAGE_LIKE_RATE_THRESHOLD:
-        return ()
-    return (
-        f"discount_rate_fraction is {rate:g}, which the model read as "
-        f"{rate * 100:g}% per year; a value above "
-        f"{PERCENTAGE_LIKE_RATE_THRESHOLD:.1f} is usually a percentage entered as "
-        f"a fraction, and {rate:g}% would be {rate / 100:g}. NPV, discounted "
-        f"payback, and LCOS use {rate * 100:g}%.",
-    )
+    if rate > PERCENTAGE_LIKE_RATE_THRESHOLD:
+        warnings.append(
+            f"discount_rate_fraction is {rate:g}, which the model read as "
+            f"{rate * 100:g}% per year; a value above "
+            f"{PERCENTAGE_LIKE_RATE_THRESHOLD:.1f} is usually a percentage entered as "
+            f"a fraction, and {rate:g}% would be {rate / 100:g}. NPV, discounted "
+            f"payback, and LCOS use {rate * 100:g}%."
+        )
+
+    escalation = assumptions.annual_opex_escalation_fraction
+    if escalation > PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD:
+        warnings.append(
+            f"annual_opex_escalation_fraction is {escalation:g}, which the model read "
+            f"as {escalation * 100:g}% per year; a value above "
+            f"{PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD:g} is usually a percentage "
+            f"entered as a fraction, and {escalation:g}% would be {escalation / 100:g}. "
+            f"Fixed OPEX compounds at {escalation * 100:g}% per year in NPV and LCOS."
+        )
+
+    return tuple(warnings)
 
 
 def net_present_value(cash_flows_eur: Sequence[float], discount_rate_fraction: float) -> float:
