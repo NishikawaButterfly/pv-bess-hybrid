@@ -106,6 +106,51 @@ class CommandLineTests(unittest.TestCase):
         )
         return scenario_path
 
+    def _scenario_with_escalation(self, directory: Path, escalation: float) -> Path:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["financial"]["annual_opex_escalation_fraction"] = escalation
+        scenario_path = directory / "scenario.json"
+        scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+        (directory / "hourly.csv").write_text(
+            self.sample.with_name("hourly.csv").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return scenario_path
+
+    def test_validate_warns_about_a_percentage_like_opex_escalation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_escalation(Path(directory), 1)
+            output = StringIO()
+            with redirect_stdout(output):
+                status = main(["validate", "--scenario", str(scenario_path)])
+        self.assertEqual(status, 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["status"], "valid")
+        # The sample's discount rate is ordinary, so escalation is the only entry.
+        self.assertEqual(len(payload["warnings"]), 1)
+        self.assertIn("annual_opex_escalation_fraction", payload["warnings"][0])
+        self.assertIn("100%", payload["warnings"][0])
+
+    def test_percentage_like_opex_escalation_is_reported_on_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            scenario_path = self._scenario_with_escalation(directory_path, 1)
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                status = main(
+                    [
+                        "run",
+                        "--scenario",
+                        str(scenario_path),
+                        "--output",
+                        str(directory_path / "evidence"),
+                    ]
+                )
+        self.assertEqual(status, 0)
+        printed = stdout.getvalue()
+        self.assertIn("warning: annual_opex_escalation_fraction", printed)
+        self.assertIn("100%", printed)
+
     def test_percentage_like_discount_rate_is_reported_on_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)

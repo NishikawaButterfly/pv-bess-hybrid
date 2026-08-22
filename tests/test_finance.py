@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from pv_bess.dispatch import optimize_dispatch
 from pv_bess.finance import (
+    PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD,
     PERCENTAGE_LIKE_RATE_THRESHOLD,
     assumption_warnings,
     evaluate_financials,
@@ -279,6 +280,74 @@ class FinanceTests(unittest.TestCase):
         self.assertEqual(assumption_warnings(replace(base, discount_rate_fraction=1.0)), ())
         above = math.nextafter(1.0, 2.0)
         self.assertEqual(len(assumption_warnings(replace(base, discount_rate_fraction=above))), 1)
+
+    def test_percentage_like_opex_escalation_warns_and_still_returns_a_result(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        dispatch = optimize_dispatch(scenario)
+        result = evaluate_financials(
+            dispatch,
+            scenario,
+            # 1 is how "one percent" is mistyped; the field accepts it as 100%/yr.
+            FinancialAssumptions(1_000, 100, 15, 0.08, 365, annual_opex_escalation_fraction=1.0),
+        )
+        # A warning, never a refusal: the number is still calculated and returned.
+        self.assertIsInstance(result.npv_eur, float)
+        # The discount rate is ordinary, so escalation is the only entry.
+        self.assertEqual(len(result.warnings), 1)
+        warning = result.warnings[0]
+        self.assertIn("annual_opex_escalation_fraction", warning)
+        self.assertIn("100%", warning)
+        self.assertIn("0.01", warning)
+
+    def test_ordinary_opex_escalation_produces_no_warning(self) -> None:
+        scenario = make_scenario([2_000, 0], [20, 100])
+        dispatch = optimize_dispatch(scenario)
+        # Values from a deep cut through general cost inflation up to the ceiling.
+        for escalation in (-0.95, 0.0, 0.02, 0.10, 0.25):
+            with self.subTest(escalation=escalation):
+                result = evaluate_financials(
+                    dispatch,
+                    scenario,
+                    FinancialAssumptions(
+                        1_000,
+                        100,
+                        5,
+                        0.08,
+                        365,
+                        annual_opex_escalation_fraction=escalation,
+                    ),
+                )
+                self.assertEqual(result.warnings, ())
+
+    def test_opex_escalation_warning_boundary_is_the_plausibility_ceiling(self) -> None:
+        self.assertEqual(PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD, 0.25)
+        base = FinancialAssumptions(1_000, 100, 5, 0.08, 365)
+        # 0.25 (25%/yr) is the highest escalation the model still treats as
+        # plausible and stays silent; the next float above it is the first warned.
+        self.assertEqual(
+            assumption_warnings(replace(base, annual_opex_escalation_fraction=0.25)), ()
+        )
+        above = math.nextafter(0.25, 1.0)
+        self.assertEqual(
+            len(assumption_warnings(replace(base, annual_opex_escalation_fraction=above))), 1
+        )
+
+    def test_discount_rate_and_opex_escalation_warnings_coexist(self) -> None:
+        base = FinancialAssumptions(1_000, 100, 5, 0.08, 365)
+        # Both inputs percentage-typed: 8 read as 800%, 1 read as 100%.
+        both = replace(base, discount_rate_fraction=8.0, annual_opex_escalation_fraction=1.0)
+        warnings = assumption_warnings(both)
+        self.assertEqual(len(warnings), 2)
+        joined = "\n".join(warnings)
+        self.assertIn("discount_rate_fraction", joined)
+        self.assertIn("800%", joined)
+        self.assertIn("annual_opex_escalation_fraction", joined)
+        self.assertIn("100%", joined)
+
+    def test_normal_discount_and_escalation_stay_completely_silent(self) -> None:
+        # The shipped sample's rates: an 8% discount and a 2% escalation.
+        base = FinancialAssumptions(1_000, 100, 15, 0.08, 365, annual_opex_escalation_fraction=0.02)
+        self.assertEqual(assumption_warnings(base), ())
 
     def test_fade_crossing_the_capacity_floor_is_rejected(self) -> None:
         scenario = make_scenario([2_000, 0], [20, 100])

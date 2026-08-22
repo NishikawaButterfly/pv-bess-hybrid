@@ -91,6 +91,21 @@ class ApiTests(unittest.TestCase):
         self.assertIn("discount_rate_fraction", warnings[0])
         self.assertIn("800%", warnings[0])
 
+    def test_percentage_like_opex_escalation_warning_reaches_the_api(self) -> None:
+        scenario = json.loads(self.sample.read_text(encoding="utf-8"))
+        scenario["financial"]["annual_opex_escalation_fraction"] = 1
+        response = self.client.post(
+            "/api/v1/dispatch",
+            files=self._files(json.dumps(scenario).encode("utf-8")),
+        )
+        # A warning, not a rejection: the response is a complete 200 result.
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        warnings = payload["financial_summary"]["warnings"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("annual_opex_escalation_fraction", warnings[0])
+        self.assertIn("100%", warnings[0])
+
     def test_dispatch_includes_the_interval_series_for_charting(self) -> None:
         response = self.client.post("/api/v1/dispatch", files=self._files())
         self.assertEqual(response.status_code, 200)

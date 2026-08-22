@@ -45,7 +45,7 @@ If only round-trip efficiency is known, it must not be copied into both directio
 - cash flows are nominal EUR, unlevered, and pre-tax;
 - CAPEX occurs at time zero;
 - annual operating benefits occur at each year end;
-- the discount and escalation rates are fractions, not percentages. `discount_rate_fraction` accepts `[-0.95, 10]` for numerical conditioning and because IRR is searched over the same interval; a value above `1.0` is almost always a percentage typed as a fraction, so it is reported as a warning rather than refused. Rates above 100% remain legal and are calculated as given;
+- the discount and escalation rates are fractions, not percentages. `discount_rate_fraction` accepts `[-0.95, 10]` for numerical conditioning and because IRR is searched over the same interval; a value above `1.0` is almost always a percentage typed as a fraction, so it is reported as a warning rather than refused. `annual_opex_escalation_fraction` accepts `[-0.95, 1]`; a value above `0.25` (25% a year) is beyond any plausible sustained escalation of a fixed operating-cost line, so it too is reported as a warning rather than refused. Both remain legal above their thresholds and are calculated as given;
 - `annualization_factor` explicitly scales the modeled period to one year;
 - `annual_benefit_degradation_fraction` is a financial haircut on incremental operating value only; it is not a battery capacity-fade model and does not alter LCOS energy. Physical fade is the battery's fade parameters, which scale each year's benefit, variable cost, and discharged energy together;
 - IRR is returned only for a conventional cash-flow sequence with exactly one sign change.
@@ -69,6 +69,7 @@ A warning never changes a calculated value, never changes either provenance hash
 | Condition | Warning |
 | --- | --- |
 | `discount_rate_fraction` above `1.0` | The rate was read as a percentage per year; a percentage was probably typed as a fraction |
+| `annual_opex_escalation_fraction` above `0.25` | The escalation was read as a percentage per year; a percentage was probably typed as a fraction |
 
 ## Limits
 
