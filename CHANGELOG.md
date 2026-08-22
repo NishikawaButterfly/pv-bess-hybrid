@@ -8,6 +8,8 @@ All notable changes are documented here. The format follows Keep a Changelog and
 
 - warnings for financial assumptions that validate but are probably mistyped. A `discount_rate_fraction` above `1.0` — most often a percentage typed as a fraction, such as `8` for 8% — is now reported with the value and how the model read it, instead of silently producing an NPV and LCOS wrong by orders of magnitude. Warnings are generated once in the financial kernel and carried on the result, so `pv-bess validate`, `pv-bess run`, `pv-bess sensitivity`, `summary.json` (`financial_summary.warnings`), `sensitivity.json`, the HTTP API, and the Excel Summary sheet all report the same text. A rate above 100% is legal and occasionally intended, so it is warned about and calculated, never refused; no calculated value, provenance hash, or exit status changes.
 
+- a warning for a percentage-typed `annual_opex_escalation_fraction`: a value above `0.25` — most often `1` typed for 1% — is reported with the value and how the model read it, on the same surfaces as the discount-rate warning, and the two coexist when both inputs are mistyped. No calculated value, provenance hash, or exit status changes.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added
