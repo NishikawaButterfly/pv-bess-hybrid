@@ -2,7 +2,9 @@
   "schema_version": "1.0",
   "parameters": {
     "market_price_level": { "multipliers": [0.8, 1.2] },
-    "energy_capacity_kwh": { "multipliers": [0.5, 1.5] },
-    "degradation_cost_eur_per_mwh_dc_discharged": { "values": [0, 20] }
+    "energy_capacity_kwh": { "multipliers": [0.5, 1.5], "capex_eur_per_kwh": 250 },
+    "degradation_cost_eur_per_mwh_dc_discharged": { "values": [0, 20] },
+    "capex_eur": { "multipliers": [0.8, 1.2] },
+    "discount_rate_fraction": { "values": [0.06, 0.1] }
   }
 }
