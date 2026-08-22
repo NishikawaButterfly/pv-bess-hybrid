@@ -25,8 +25,9 @@ for the size of the error and where the warning appears.
 
 `annual_opex_escalation_fraction` is a fraction the same way and carries the same trap: `1`
 means 100% escalation per year, not 1%. Its range is `[-0.95, 1]`, so it cannot reach 800%,
-but a mistyped percentage is still ruinous — it is the input that quietly compounds a fixed
-OPEX line to 26x over this sample's 15-year life. A value above `0.25` (25% a year), already
+but a mistyped percentage is still ruinous — at 100% escalation the fixed OPEX line
+doubles every year, compounding to more than 16,000x its first-year value across this
+sample's 15-year life (2¹⁴ = 16,384). A value above `0.25` (25% a year), already
 beyond any plausible sustained escalation of an operating-cost line, now produces a warning
 naming the value and how it was read, exactly as the discount rate does. The two warnings
 share one channel, so a scenario that mistypes both shows both.
