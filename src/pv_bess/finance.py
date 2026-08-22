@@ -25,13 +25,13 @@ PERCENTAGE_LIKE_RATE_THRESHOLD = 1.0
 # line, which tracks general cost inflation: low-to-mid single digits in normal
 # conditions, and even a deliberately harsh inflationary stress case rarely
 # sustains more than about 20% a year over a project life. 25% a year already
-# compounds fixed OPEX to roughly 26x across a 15-year life, which no maintenance
-# budget plans for, so 0.25 is the highest escalation the model still treats as
-# plausible and leaves silent; anything above it is far more likely a percentage
-# (the classic "1" for 1%) typed into a fraction field. The ceiling is
-# deliberately tighter than the discount rate's 1.0: a 100% hurdle rate is an
-# extreme-but-conceivable cost of capital, whereas a 100% operating-cost
-# escalation is not, so the two are judged separately.
+# compounds fixed OPEX to roughly 23x across a 15-year life (1.25**14 = 22.7),
+# which no maintenance budget plans for, so 0.25 is the highest escalation the
+# model still treats as plausible and leaves silent; anything above it is far
+# more likely a percentage (the classic "1" for 1%) typed into a fraction
+# field. The ceiling is deliberately tighter than the discount rate's 1.0: a
+# 100% hurdle rate is an extreme-but-conceivable cost of capital, whereas a
+# 100% operating-cost escalation is not, so the two are judged separately.
 PERCENTAGE_LIKE_OPEX_ESCALATION_THRESHOLD = 0.25
 
 
