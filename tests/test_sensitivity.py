@@ -577,7 +577,7 @@ class SensitivityCommandLineTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": "1.0",
-                        "parameters": {"discount_rate_fraction": {"values": [0.1]}},
+                        "parameters": {"annual_fixed_opex_eur": {"values": [50_000]}},
                     }
                 ),
                 encoding="utf-8",

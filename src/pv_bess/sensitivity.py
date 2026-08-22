@@ -19,16 +19,23 @@ from pv_bess.models import (
 SPEC_SCHEMA_VERSION = "1.0"
 MAX_TOTAL_RUNS = 32
 SUPPORTED_PARAMETERS = (
+    "capex_eur",
     "charge_efficiency",
     "degradation_cost_eur_per_mwh_dc_discharged",
     "discharge_efficiency",
+    "discount_rate_fraction",
     "energy_capacity_kwh",
     "market_price_level",
     "power_kw",
 )
+# Financial parameters never enter the MILP, so their variants share the base
+# dispatch and only the financial evaluation is redone.
+FINANCIAL_PARAMETERS = frozenset({"capex_eur", "discount_rate_fraction"})
+_CAPACITY_PARAMETER = "energy_capacity_kwh"
 _MULTIPLIER_ONLY_PARAMETERS = frozenset({"market_price_level"})
 _SPEC_ROOT_KEYS = frozenset({"schema_version", "parameters"})
 _ENTRY_KEYS = frozenset({"multipliers", "values"})
+_COST_KEY = "capex_eur_per_kwh"
 
 ValueMode = Literal["multiplier", "absolute"]
 
@@ -39,11 +46,14 @@ class SensitivitySpecError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class SensitivityVariant:
-    """One scenario change: a single parameter set to a multiplier or absolute value."""
+    """One change to the base case: a single parameter set to a multiplier or
+    absolute value, with the marginal cost of capacity declared when the
+    parameter resizes the battery."""
 
     parameter: str
     mode: ValueMode
     value: float
+    capex_eur_per_kwh: float | None = None
 
     def __post_init__(self) -> None:
         if self.parameter not in SUPPORTED_PARAMETERS:
@@ -57,6 +67,22 @@ class SensitivityVariant:
             raise SensitivitySpecError(f"{self.parameter} variant values must be finite")
         if self.mode == "multiplier" and self.value <= 0:
             raise SensitivitySpecError(f"{self.parameter} multipliers must be greater than zero")
+        if self.parameter == _CAPACITY_PARAMETER:
+            if self.capex_eur_per_kwh is None:
+                raise SensitivitySpecError(
+                    f"{_CAPACITY_PARAMETER} variants resize the battery while capex_eur "
+                    "stays at the base value, so every size would carry the same capital "
+                    f"cost; declare {_COST_KEY} (the marginal cost of capacity, in EUR "
+                    f"per kWh) on the {_CAPACITY_PARAMETER} entry so each variant's "
+                    "CAPEX co-varies with its size"
+                )
+            if not isfinite(self.capex_eur_per_kwh) or self.capex_eur_per_kwh < 0:
+                raise SensitivitySpecError(f"{_COST_KEY} must be finite and nonnegative")
+        elif self.capex_eur_per_kwh is not None:
+            raise SensitivitySpecError(
+                f"{_COST_KEY} applies only to {_CAPACITY_PARAMETER} variants; "
+                f"{self.parameter} does not resize the battery"
+            )
 
     @property
     def label(self) -> str:
@@ -90,7 +116,15 @@ class SensitivitySpec:
 
 @dataclass(frozen=True, slots=True)
 class SensitivityRun:
-    """The financial and market metrics of one kernel run."""
+    """The financial and market metrics of one row of the table.
+
+    ``capex_eur`` is the capital cost the row was evaluated under: the base
+    value for physical variants, the scanned value on the ``capex_eur`` axis,
+    and the derived ``base + delta_kwh * capex_eur_per_kwh`` for capacity
+    variants. ``warnings`` are the kernel's judgment of the assumptions this
+    row used, so a scanned value that crosses a threshold is flagged on the
+    row that crossed it.
+    """
 
     label: str
     parameter: str | None
@@ -104,6 +138,8 @@ class SensitivityRun:
     simple_payback_years: float | None
     discounted_payback_years: float | None
     lcos_eur_per_mwh: float | None
+    capex_eur: float
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,8 +157,9 @@ class SensitivityResult:
     time_limit_seconds_per_phase: float
     base: SensitivityRun
     variants: tuple[SensitivityRun, ...]
-    # Every run shares one set of financial assumptions, so the base run's
-    # warnings describe the whole table and are carried once, not per row.
+    # The base case's warnings, kept at table level so an existing mistyped
+    # input is not repeated on every row; a variant whose own assumptions
+    # cross a threshold carries that warning on its run instead.
     warnings: tuple[str, ...] = ()
 
 
@@ -165,6 +202,18 @@ def parse_sensitivity_spec(payload: Any) -> SensitivitySpec:
         if not isinstance(entry, dict):
             raise SensitivitySpecError(f"{parameter} must be a JSON object")
         keys = set(entry)
+        cost: float | None = None
+        if _COST_KEY in keys:
+            if parameter != _CAPACITY_PARAMETER:
+                raise SensitivitySpecError(
+                    f"{_COST_KEY} applies only to {_CAPACITY_PARAMETER} variants; "
+                    f"{parameter} does not resize the battery"
+                )
+            raw_cost = entry[_COST_KEY]
+            if isinstance(raw_cost, bool) or not isinstance(raw_cost, int | float):
+                raise SensitivitySpecError(f"{parameter}.{_COST_KEY} must be a JSON number")
+            cost = float(raw_cost)
+            keys.discard(_COST_KEY)
         if len(keys) != 1 or not keys <= _ENTRY_KEYS:
             raise SensitivitySpecError(
                 f"{parameter} must define exactly one of 'multipliers' or 'values'"
@@ -172,7 +221,7 @@ def parse_sensitivity_spec(payload: Any) -> SensitivitySpec:
         key = next(iter(keys))
         mode: ValueMode = "multiplier" if key == "multipliers" else "absolute"
         variants.extend(
-            SensitivityVariant(parameter=parameter, mode=mode, value=value)
+            SensitivityVariant(parameter=parameter, mode=mode, value=value, capex_eur_per_kwh=cost)
             for value in _number_list(entry, parameter, key)
         )
     return SensitivitySpec(variants=tuple(variants))
@@ -185,9 +234,15 @@ def _resolved(base_value: float, variant: SensitivityVariant) -> float:
 
 
 def apply_variant(scenario: Scenario, variant: SensitivityVariant) -> Scenario:
-    """Return a revalidated copy of the scenario with exactly one parameter changed."""
+    """Return a revalidated copy of the scenario with exactly one parameter changed.
+
+    Financial parameters do not live in the scenario, so their variants return
+    it untouched; :func:`variant_assumptions` is where they take effect.
+    """
 
     try:
+        if variant.parameter in FINANCIAL_PARAMETERS:
+            return scenario
         if variant.parameter == "market_price_level":
             intervals = tuple(
                 IntervalInput(
@@ -236,11 +291,48 @@ def apply_variant(scenario: Scenario, variant: SensitivityVariant) -> Scenario:
         ) from exc
 
 
+def variant_assumptions(
+    scenario: Scenario,
+    assumptions: FinancialAssumptions,
+    variant: SensitivityVariant,
+) -> FinancialAssumptions:
+    """Return the revalidated financial assumptions a variant is evaluated under.
+
+    Physical variants other than capacity share the base assumptions. A
+    capacity variant derives its CAPEX from the declared marginal cost, so a
+    resized battery is priced as resized instead of inheriting the base cost.
+    """
+
+    try:
+        if variant.parameter == "capex_eur":
+            return replace(assumptions, capex_eur=_resolved(assumptions.capex_eur, variant))
+        if variant.parameter == "discount_rate_fraction":
+            return replace(
+                assumptions,
+                discount_rate_fraction=_resolved(assumptions.discount_rate_fraction, variant),
+            )
+        if variant.parameter == _CAPACITY_PARAMETER:
+            # The variant constructor refuses capacity variants without a cost.
+            assert variant.capex_eur_per_kwh is not None
+            base_kwh = scenario.battery.energy_capacity_kwh
+            delta_kwh = _resolved(base_kwh, variant) - base_kwh
+            return replace(
+                assumptions,
+                capex_eur=assumptions.capex_eur + delta_kwh * variant.capex_eur_per_kwh,
+            )
+        return assumptions
+    except ValueError as exc:
+        raise SensitivitySpecError(
+            f"variant {variant.label!r} produces invalid financial assumptions: {exc}"
+        ) from exc
+
+
 def _run_metrics(
     label: str,
     variant: SensitivityVariant | None,
     dispatch: DispatchResult,
     financial: FinancialResult,
+    assumptions: FinancialAssumptions,
 ) -> SensitivityRun:
     return SensitivityRun(
         label=label,
@@ -255,6 +347,8 @@ def _run_metrics(
         simple_payback_years=financial.simple_payback_years,
         discounted_payback_years=financial.discounted_payback_years,
         lcos_eur_per_mwh=financial.lcos_eur_per_mwh,
+        capex_eur=assumptions.capex_eur,
+        warnings=financial.warnings,
     )
 
 
@@ -268,7 +362,14 @@ def run_sensitivity(
 ) -> SensitivityResult:
     """Solve the base case and every one-at-a-time variant with the unchanged kernel."""
 
-    variant_scenarios = [(variant, apply_variant(scenario, variant)) for variant in spec.variants]
+    variant_inputs = [
+        (
+            variant,
+            apply_variant(scenario, variant),
+            variant_assumptions(scenario, assumptions, variant),
+        )
+        for variant in spec.variants
+    ]
 
     base_dispatch = optimize_dispatch(
         scenario,
@@ -276,20 +377,28 @@ def run_sensitivity(
         relative_mip_gap=relative_mip_gap,
     )
     base_financial = evaluate_financials(base_dispatch, scenario, assumptions)
-    base_run = _run_metrics("base", None, base_dispatch, base_financial)
+    base_run = _run_metrics("base", None, base_dispatch, base_financial, assumptions)
 
     variant_runs: list[SensitivityRun] = []
-    for variant, variant_scenario in variant_scenarios:
-        try:
-            dispatch = optimize_dispatch(
-                variant_scenario,
-                time_limit_seconds=time_limit_seconds,
-                relative_mip_gap=relative_mip_gap,
-            )
-        except DispatchOptimizationError as exc:
-            raise DispatchOptimizationError(f"variant {variant.label!r}: {exc}") from exc
-        financial = evaluate_financials(dispatch, variant_scenario, assumptions)
-        variant_runs.append(_run_metrics(variant.label, variant, dispatch, financial))
+    for variant, variant_scenario, variant_assumption_set in variant_inputs:
+        if variant.parameter in FINANCIAL_PARAMETERS:
+            # The dispatch is a function of the scenario alone, so a
+            # financial-only variant shares the base solve and its row keeps
+            # the base dispatch_input_sha256 to say so.
+            dispatch = base_dispatch
+        else:
+            try:
+                dispatch = optimize_dispatch(
+                    variant_scenario,
+                    time_limit_seconds=time_limit_seconds,
+                    relative_mip_gap=relative_mip_gap,
+                )
+            except DispatchOptimizationError as exc:
+                raise DispatchOptimizationError(f"variant {variant.label!r}: {exc}") from exc
+        financial = evaluate_financials(dispatch, variant_scenario, variant_assumption_set)
+        variant_runs.append(
+            _run_metrics(variant.label, variant, dispatch, financial, variant_assumption_set)
+        )
 
     return SensitivityResult(
         scenario_name=scenario.name,
