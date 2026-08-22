@@ -152,10 +152,11 @@ constraint — with 40.2 MWh of PV and a 5 MW export limit, there is nothing mor
 
 The comparison is deliberately unfair, and it is worth naming why: **both runs charge
 EUR 5,000,000 of CAPEX.** A tenfold larger battery at the same price is not an engineering
-option. The same caveat applies to the `energy_capacity_kwh` variants in
-[sensitivity analysis](21-sensitivity.md), which vary the battery while holding CAPEX
-fixed. To size honestly, change the capacity **and** the CAPEX together in separate
-scenario files, and compare those.
+option. The `energy_capacity_kwh` variants in
+[sensitivity analysis](21-sensitivity.md) refuse to make this mistake: a capacity sweep
+must declare `capex_eur_per_kwh` and each variant's CAPEX is derived from its size. The
+declared cost is linear, so for a shortlisted size, still write the real quote into its
+own scenario file and compare those.
 
 ## Reading the cycle count
 

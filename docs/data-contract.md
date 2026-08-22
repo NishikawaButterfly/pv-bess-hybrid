@@ -61,7 +61,7 @@ Warnings are generated once, in the financial kernel, and carried on the result.
 | `pv-bess run` | `warning:` lines on stdout, before the artifact paths |
 | `summary.json` | `financial_summary.warnings`, always present, empty when there are none |
 | HTTP API | `financial_summary.warnings` of the `/api/v1/dispatch` response |
-| `pv-bess sensitivity` | `warning:` lines on stdout, and `warnings` in `sensitivity.json` |
+| `pv-bess sensitivity` | `warning:` lines on stdout (the base case's, plus variant-labelled lines for warnings a scanned value introduced), `warnings` beside the table in `sensitivity.json`, and `warnings` on every row of both table files |
 | `export-xlsx` | A `Warnings` section on the Summary sheet, present only when non-empty |
 
 A warning never changes a calculated value, never changes either provenance hash, and never fails a run. The current list is:

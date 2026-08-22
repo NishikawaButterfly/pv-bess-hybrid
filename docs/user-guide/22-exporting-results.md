@@ -83,17 +83,21 @@ ready for a spreadsheet:
 
 ```text
 label,parameter,mode,value,dispatch_input_sha256,analysis_input_sha256,market_value_eur,
-npv_eur,irr_fraction,simple_payback_years,discounted_payback_years,lcos_eur_per_mwh
+npv_eur,irr_fraction,simple_payback_years,discounted_payback_years,lcos_eur_per_mwh,
+capex_eur,warnings
 ```
 
-One row per run, base first. Null metrics are empty cells. There is no `export-xlsx`
-equivalent for sensitivity results.
+One row per run, base first. Null metrics are empty cells. `capex_eur` is the capital
+cost the row was evaluated under — derived for capacity variants, scanned on the
+`capex_eur` axis, the base value everywhere else. `warnings` joins the row's warnings
+with `; ` in the CSV; the JSON keeps them as a list. There is no `export-xlsx` equivalent
+for sensitivity results.
 
 ## What you cannot export
 
 Worth knowing before you plan a deliverable around this tool.
 
-**No per-interval data in the sensitivity output.** Each variant reports six scalars. The
+**No per-interval data in the sensitivity output.** Each variant reports scalars only. The
 schedules that produced them are solved, used, and discarded — so you cannot see *why* a
 variant behaved differently, only that it did. Reproducing a variant's schedule means
 rebuilding it as a standalone scenario and running it again.

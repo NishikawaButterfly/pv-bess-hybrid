@@ -10,6 +10,12 @@ All notable changes are documented here. The format follows Keep a Changelog and
 
 - a warning for a percentage-typed `annual_opex_escalation_fraction`: a value above `0.25` — most often `1` typed for 1% — is reported with the value and how the model read it, on the same surfaces as the discount-rate warning, and the two coexist when both inputs are mistyped. No calculated value, provenance hash, or exit status changes.
 
+- `capex_eur` and `discount_rate_fraction` as sensitivity parameters. Neither enters the dispatch optimization, so their variants share the base solve: the row keeps the base `dispatch_input_sha256` while `analysis_input_sha256` and the financial metrics move, and nothing is re-solved for effect. Every sensitivity row now also reports the `capex_eur` it was evaluated under and the kernel's `warnings` for its own assumptions (appended `capex_eur` and `warnings` columns in `sensitivity.csv`, matching fields on each row of `sensitivity.json`), and the CLI prints a warning a scanned value introduced labelled with its variant. Existing specs without capacity variants gain only these appended fields; every existing value, threshold, warning text, and provenance hash is unchanged.
+
+### Changed
+
+- an `energy_capacity_kwh` sensitivity entry now requires `capex_eur_per_kwh`, the marginal cost of capacity: each variant's CAPEX is derived as the base CAPEX plus the capacity delta times the declared cost, and reported on its row. A capacity entry without the declaration — previously accepted, with every size inheriting the base CAPEX — is refused with a message naming the field, because a sweep that prices a bigger battery the same as a smaller one biases every sizing conclusion toward the larger battery. The bundled `sample-data/sensitivity-spec.json` declares `250` (the linear cost implied by its own base pair) and also scans both new financial axes.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added
