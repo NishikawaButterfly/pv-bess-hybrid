@@ -234,15 +234,11 @@ class SensitivityFinancialAndCostTests(unittest.TestCase):
             self.assertIn("same capital cost", message)
 
     def test_cost_declared_on_a_non_capacity_parameter_is_refused(self) -> None:
-        with self.assertRaisesRegex(
-            SensitivitySpecError, "applies only to energy_capacity_kwh"
-        ):
+        with self.assertRaisesRegex(SensitivitySpecError, "applies only to energy_capacity_kwh"):
             _spec({"power_kw": {"multipliers": [1.5], "capex_eur_per_kwh": 100}})
 
     def test_capacity_sweep_co_varies_capex(self) -> None:
-        spec = _spec(
-            {"energy_capacity_kwh": {"multipliers": [2.0], "capex_eur_per_kwh": 400}}
-        )
+        spec = _spec({"energy_capacity_kwh": {"multipliers": [2.0], "capex_eur_per_kwh": 400}})
         result = run_sensitivity(self.scenario, self.assumptions, spec)
         (doubled,) = result.variants
         self.assertEqual(result.base.capex_eur, 1_000)
@@ -256,13 +252,9 @@ class SensitivityFinancialAndCostTests(unittest.TestCase):
         self.assertNotEqual(doubled.analysis_input_sha256, result.base.analysis_input_sha256)
 
     def test_capacity_shrink_below_zero_capex_shows_the_arithmetic(self) -> None:
-        spec = _spec(
-            {"energy_capacity_kwh": {"values": [100], "capex_eur_per_kwh": 400}}
-        )
+        spec = _spec({"energy_capacity_kwh": {"values": [100], "capex_eur_per_kwh": 400}})
         with (
-            mock.patch(
-                "pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch
-            ) as solver,
+            mock.patch("pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch) as solver,
             self.assertRaises(SensitivitySpecError) as raised,
         ):
             run_sensitivity(self.scenario, self.assumptions, spec)
@@ -301,17 +293,13 @@ class SensitivityFinancialAndCostTests(unittest.TestCase):
                 "discount_rate_fraction": {"values": [0.12]},
             }
         )
-        with mock.patch(
-            "pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch
-        ) as solver:
+        with mock.patch("pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch) as solver:
             result = run_sensitivity(self.scenario, self.assumptions, spec)
         self.assertEqual(solver.call_count, 1)
         for variant in result.variants:
             self.assertEqual(variant.dispatch_input_sha256, result.base.dispatch_input_sha256)
             self.assertEqual(variant.market_value_eur, result.base.market_value_eur)
-            self.assertNotEqual(
-                variant.analysis_input_sha256, result.base.analysis_input_sha256
-            )
+            self.assertNotEqual(variant.analysis_input_sha256, result.base.analysis_input_sha256)
             self.assertNotEqual(variant.npv_eur, result.base.npv_eur)
 
     def test_scanned_rate_above_threshold_carries_the_warning_on_that_variant(self) -> None:
@@ -481,9 +469,7 @@ class SensitivityCommandLineTests(unittest.TestCase):
         # empty and the scanned rate's warning lives on its own row.
         self.assertEqual(payload["warnings"], [])
         (scanned,) = [
-            item
-            for item in payload["variants"]
-            if item["label"] == "discount_rate_fraction=8"
+            item for item in payload["variants"] if item["label"] == "discount_rate_fraction=8"
         ]
         self.assertEqual(len(scanned["warnings"]), 1)
         self.assertIn("800%", scanned["warnings"][0])
