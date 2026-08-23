@@ -10,6 +10,16 @@ error: dispatch optimization failed with status 2: The problem is infeasible.
 
 Exit code 1, no artifacts written. Over the API the same message arrives as a 422.
 
+You should now meet this message rarely to never. Every structural infeasibility the model
+admits requires a terminal SOC target the battery cannot reach, any such target differs
+from the initial SOC, and a terminal different from the initial is refused by `validate`
+and by every run surface *before* the solve, for the financial reason. A scenario that
+passes `validate` therefore always has a feasible dispatch — the idle battery, holding its
+SOC and curtailing all PV, satisfies every constraint. The causes below remain worth
+understanding: they are why the terminal-equality rule is load-bearing, and they still
+apply if you drive `optimize_dispatch` directly as a library, where an asymmetric terminal
+target is supported.
+
 ## The message tells you nothing about the cause
 
 This is the practical difficulty. The message is identical for every infeasible scenario —
@@ -41,8 +51,8 @@ allowed.
 **The fix.** In order of preference:
 
 1. Set `terminal_soc_fraction` equal to `initial_soc_fraction`, or omit it. The financial
-   layer requires equality anyway, so any other value will be rejected later even if the
-   dispatch solves.
+   layer requires equality, and `validate` and every run surface now refuse any other
+   value before a solve starts.
 2. Lengthen the horizon.
 3. Raise `max_charge_power_kw`.
 4. Enable grid charging, if the project permits it.
@@ -109,11 +119,13 @@ terminal SOC target.
 
 ## A diagnostic routine
 
-When a scenario comes back infeasible:
+When a scenario comes back infeasible — which through the CLI, sensitivity, and the API
+should no longer happen, since the one structural cause is refused pre-solve — the routine
+for library use, or for a status-2 message you cannot explain:
 
 1. **Check `terminal_soc_fraction` first.** If it differs from `initial_soc_fraction`, set
-   them equal and re-run. This resolves most cases, and any other value would fail the
-   financial layer regardless.
+   them equal and re-run. This resolves most cases, and any other value is refused before
+   the solve everywhere the financial layer follows.
 2. **Compute the energy budget by hand.** DC energy demanded by the SOC change against AC
    energy available across the horizon. This is a two-line calculation and it is usually
    decisive.
@@ -126,22 +138,26 @@ When a scenario comes back infeasible:
 
 ## Failures that are not infeasibility
 
-Two error classes arrive after the solve and are easy to misread as infeasibility:
+Two financial refusals are easy to misread as infeasibility. Both are decidable from the
+inputs, so they now arrive from `validate` and from every run surface *before* any solve:
 
 ```text
 error: financial evaluation requires terminal SOC to equal initial SOC; inventory
 valuation is not implemented
 ```
 
-The dispatch solved perfectly. The financial layer refused it. Set the two SOC fractions
-equal.
+Nothing was solved. The financial layer's precondition refused the scenario. Set the two
+SOC fractions equal.
 
 ```text
 error: the fade parameters drive the year-5 capacity fraction to 0.84, below the validated
 minimum_capacity_fraction of 0.85; reduce the fade parameters or shorten project_life_years
 ```
 
-Also post-solve, and unusually helpful: it names the year, the value, and the two ways out.
+Pre-solve when only calendar fade is set, and unusually helpful: it names the year, the
+value, and the two ways out. With a nonzero `cycling_fade_fraction_per_efc` the same
+message can still arrive after the solve, because the fade rate then depends on how hard
+the solved dispatch cycles the battery.
 
 And one that looks like infeasibility on a large scenario but is not:
 

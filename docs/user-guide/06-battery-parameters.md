@@ -60,8 +60,8 @@ error: initial_soc_fraction must be inside the operating window
 ```
 
 `terminal_soc_fraction` defaults to `initial_soc_fraction`, and the financial layer
-**requires** them to be equal. Setting them differently passes validation and then fails
-after the solve:
+**requires** them to be equal. Setting them differently is refused by `validate` and by
+every run surface before any solve:
 
 ```text
 error: financial evaluation requires terminal SOC to equal initial SOC; inventory

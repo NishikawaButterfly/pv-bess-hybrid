@@ -155,32 +155,25 @@ validated range but probably mistyped — see the discount rate below.
 
 ## Two things `status: valid` does not mean
 
-`status: valid` means the files are well-formed and every value is individually within its
-domain. It does **not** mean the run will succeed, and it does not mean the values are
-sensible. Two cases are worth knowing by name. Validation is silent about the first and
-warns about the second, but neither is refused.
+`status: valid` means the files are well-formed, every value is within its domain, and
+every refusal that is decidable from the inputs alone — including the financial layer's —
+has been checked. It does **not** mean the solve will finish, and it does not mean the
+values are sensible. Validation declares the first in its own output and warns about the
+second, but can refuse neither.
 
-### Terminal SOC that the financial layer will reject
+### The solve itself, which validate names rather than proves
 
-The battery accepts any `terminal_soc_fraction` inside the operating window. The financial
-layer requires it to equal `initial_soc_fraction`, because valuing left-over stored energy
-is not implemented. So a scenario with `initial_soc_fraction: 0.5` and
-`terminal_soc_fraction: 0.6` validates cleanly:
-
-```json
-{ "status": "valid", "interval_count": 24, "...": "..." }
-```
-
-and then fails after the solver has already done its work:
-
-```text
-error: financial evaluation requires terminal SOC to equal initial SOC; inventory
-valuation is not implemented
-```
-
-On a 24-hour scenario the wasted time is trivial. On a scenario near the practical solve
-limit it is minutes. Until `validate` checks this, treat "terminal SOC equals initial SOC"
-as a rule you enforce yourself.
+A refusal that depends on the inputs alone is checked at validation time: a
+`terminal_soc_fraction` different from `initial_soc_fraction`, or a calendar-only fade
+projection that breaches `minimum_capacity_fraction`, is refused by `validate` with the
+same message the run would produce, and the run surfaces refuse it before paying for a
+solve. What remains genuinely undecidable without solving is listed by `validate` itself,
+in the `not_provable_without_solving` array of its output: the solver may stop at its
+per-phase time limit, it may fail numerically, every returned dispatch is re-validated
+against the model's invariants and refused if it violates them, and — only when
+`cycling_fade_fraction_per_efc` is above zero — the capacity-fade floor depends on the
+solved dispatch's cycling. Each entry names a class of failure that only the solve can
+rule out; none of them is a property of the scenario file.
 
 ### A discount rate entered as a percentage
 

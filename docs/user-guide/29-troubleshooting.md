@@ -59,10 +59,10 @@ noted.
 
 | Message | Status | Cause | Fix |
 | --- | --- | --- | --- |
-| `dispatch optimization failed with status 2: The problem is infeasible. (HiGHS Status 8: ...)` | 422 | No schedule satisfies the constraints | See [chapter 25](25-infeasibilities.md); check terminal SOC first |
+| `dispatch optimization failed with status 2: The problem is infeasible. (HiGHS Status 8: ...)` | 422 | No schedule satisfies the constraints — no longer reachable through validate-accepted scenarios | See [chapter 25](25-infeasibilities.md) |
 | `dispatch optimization failed with status 1: Time limit reached. (HiGHS Status 13: ...)` | 422 | Solver ran out of time in one phase | Shorten the horizon; raise `--time-limit`; loosen `--mip-gap` |
-| `financial evaluation requires terminal SOC to equal initial SOC; inventory valuation is not implemented` | 422 | Terminal differs from initial | Set them equal, or omit `terminal_soc_fraction` |
-| `the fade parameters drive the year-N capacity fraction to X, below the validated minimum_capacity_fraction of Y; reduce the fade parameters or shorten project_life_years` | 422 | Fade crosses the floor within the project life | Do exactly what the message says |
+| `financial evaluation requires terminal SOC to equal initial SOC; inventory valuation is not implemented` | 422 | Terminal differs from initial — refused before any solve, and by `validate` | Set them equal, or omit `terminal_soc_fraction` |
+| `the fade parameters drive the year-N capacity fraction to X, below the validated minimum_capacity_fraction of Y; reduce the fade parameters or shorten project_life_years` | 422 | Fade crosses the floor within the project life — pre-solve for calendar-only fade, post-solve with cycling fade | Do exactly what the message says |
 | `dispatch refinement changed the economic optimum` | 422 | Numerical conditioning | Rescale extreme inputs |
 | `refusing to overwrite summary.json, dispatch.csv; pass --force to replace them` | — | Output directory already used | Use a new directory, or `--force` |
 | `refusing to overwrite report.xlsx; pass --force to replace it` | — | Workbook exists | As above |
