@@ -145,9 +145,9 @@ base_dispatch_input_sha256: 76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef
 base_analysis_input_sha256: c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8
 ```
 
-Seven runs — a base plus six variants — in 2.4 seconds on the reference machine. The base
-row's hashes match a plain `run` of the same scenario exactly, which is the check that the
-sensitivity layer is not a different calculation. Covered in
+Eleven runs — a base plus ten variants — in about two seconds on the reference machine.
+The base row's hashes match a plain `run` of the same scenario exactly, which is the check
+that the sensitivity layer is not a different calculation. Covered in
 [chapter 21](21-sensitivity.md).
 
 ## Exit behaviour

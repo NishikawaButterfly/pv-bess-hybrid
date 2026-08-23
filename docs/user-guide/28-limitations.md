@@ -104,7 +104,7 @@ No rolling-horizon or chunked-solve mode exists. The repository names it as futu
 | No forecast error | Apply an explicit external haircut | Unquantified by the model |
 | No cycle-life limit | Check annualised EFC against the warranty by hand | Nothing enforces it |
 | No replacement CAPEX | Shorten `project_life_years` to the pre-replacement period | Ignores post-replacement value |
-| No financial sensitivity | Edit scenario files and run each | Manual, no combined table |
+| No sensitivity on OPEX, project life, annualization, or fades | Edit scenario files and run each; `capex_eur` and `discount_rate_fraction` are scannable | Manual, no combined table |
 | No seasonality in a short period | Model several periods separately | No single annual figure |
 
 ## What to state alongside a result

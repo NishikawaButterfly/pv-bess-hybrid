@@ -136,10 +136,12 @@ Before you quote an NPV, three checks that take a minute and catch most errors:
 ## When NPV is the wrong metric
 
 NPV scales with project size, so it cannot compare a 20 MWh and a 200 MWh battery unless
-their CAPEX values are both real. In this model it is easy to vary capacity while leaving
-CAPEX fixed — the sensitivity layer does exactly that — and the resulting NPV comparison is
-meaningless as a sizing tool.
+their CAPEX values are both real. The sensitivity layer enforces this: a capacity variant
+must declare `capex_eur_per_kwh`, the marginal cost of capacity, and each row's CAPEX is
+derived from it — a capacity sweep that priced every size the same is refused rather than
+silently producing a flattering comparison. The declared cost is still a linear model of
+what capacity costs, so treat a swept size as a shortlist candidate and price it as its
+own scenario before deciding.
 
-For sizing, vary capacity and CAPEX together in separate scenarios, and read
-[LCOS](19-lcos.md) alongside NPV. For comparing against a hurdle rate, read
-[IRR](17-irr.md), remembering that it is sometimes withheld.
+For sizing, read [LCOS](19-lcos.md) alongside NPV. For comparing against a hurdle rate,
+read [IRR](17-irr.md), remembering that it is sometimes withheld.

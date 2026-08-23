@@ -529,8 +529,8 @@ def write_sensitivity_results(
         "run_count": 1 + len(result.variants),
         "base": asdict(result.base),
         "variants": [asdict(item) for item in result.variants],
-        # One set of financial assumptions drives every row, so the warnings sit
-        # beside the table rather than being repeated in each run.
+        # The table-level warnings are the base case's; a row whose own
+        # assumptions cross a threshold carries that warning on the row.
         "warnings": list(result.warnings),
         "limitations": [
             "Each variant changes exactly one parameter; combined effects are not additive.",
@@ -552,12 +552,17 @@ def write_sensitivity_results(
         "simple_payback_years",
         "discounted_payback_years",
         "lcos_eur_per_mwh",
+        "capex_eur",
+        "warnings",
     ]
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", newline="") as buffer:
         writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for run in (result.base, *result.variants):
-            writer.writerow(asdict(run))
+            row = asdict(run)
+            # The CSV is flat; the JSON keeps the warnings as a list.
+            row["warnings"] = "; ".join(run.warnings)
+            writer.writerow(row)
         buffer.seek(0)
         csv_content = buffer.read()
     _publish_text_pair(

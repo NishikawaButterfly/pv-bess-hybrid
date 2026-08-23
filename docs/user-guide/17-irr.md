@@ -46,10 +46,12 @@ value — the battery stops covering its own fixed costs around year 12. That is
 important fact about this scenario than any single rate would have been, and it is
 invisible if you only read NPV.
 
-The other reason for a `null` is that no root exists inside `[-0.95, 10]`. The repository's
-sensitivity table shows this for the `energy_capacity_kwh*0.5` variant: one sign change,
-but the project is so far from breaking even that no discount rate above -95% brings NPV to
-zero.
+The other reason for a `null` is that no root exists inside `[-0.95, 10]`: one sign
+change, but a project so far from breaking even that no discount rate above -95% brings
+NPV to zero. No row of the current sample sensitivity table produces this case; its one
+empty IRR cell, `energy_capacity_kwh*0.5`, is a two-sign-change case — with the half-size
+battery's CAPEX derived at 250 EUR/kWh, the operating flow starts positive and turns
+negative in year 14, when the declining benefit crosses the escalating OPEX.
 
 ## The values this guide's runs produced
 

@@ -150,6 +150,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             json_path, csv_path = write_sensitivity_results(args.output, result, force=args.force)
             _print_warnings(result.warnings)
+            # A warning the base case already carries describes the whole
+            # table; only a warning a scanned value introduced is per-row.
+            for run in result.variants:
+                for warning in run.warnings:
+                    if warning not in result.warnings:
+                        print(f"warning: {run.label}: {warning}")
             print(f"sensitivity_json: {json_path}")
             print(f"sensitivity_csv: {csv_path}")
             print(f"base_dispatch_input_sha256: {result.base.dispatch_input_sha256}")
