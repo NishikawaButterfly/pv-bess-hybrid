@@ -174,6 +174,47 @@ def _annual_lcos_inputs(
     return representative_cost_eur, dispatch.summary.battery_discharge_energy_mwh
 
 
+def _fade_floor_message(year: int, fraction: float, minimum_capacity_fraction: float) -> str:
+    return (
+        f"the fade parameters drive the year-{year} capacity fraction to "
+        f"{fraction:.6g}, below the validated minimum_capacity_fraction of "
+        f"{minimum_capacity_fraction:g}; reduce the fade parameters "
+        "or shorten project_life_years"
+    )
+
+
+def financial_precondition_errors(
+    scenario: Scenario, assumptions: FinancialAssumptions
+) -> tuple[str, ...]:
+    """The financial layer's refusals that are decidable from the inputs alone.
+
+    These are exactly the checks :func:`evaluate_financials` applies whose
+    outcome does not depend on the solved dispatch, in the order it applies
+    them, so a caller can refuse before paying for a solve with the same text
+    the run would produce. The cycling-fade capacity floor is deliberately not
+    here: with ``cycling_fade_fraction_per_efc`` above zero the fade rate
+    depends on the solved dispatch's equivalent full cycles, and only the solve
+    proves whether the floor holds.
+    """
+
+    errors: list[str] = []
+    battery = scenario.battery
+    if abs(battery.initial_soc_kwh - battery.terminal_soc_kwh) > 1e-9:
+        errors.append(
+            "financial evaluation requires terminal SOC to equal initial SOC; "
+            "inventory valuation is not implemented"
+        )
+    if battery.cycling_fade_fraction_per_efc == 0 and battery.calendar_fade_fraction_per_year > 0:
+        for year in range(1, assumptions.project_life_years + 1):
+            fraction = 1 - battery.calendar_fade_fraction_per_year * (year - 1)
+            if fraction < battery.minimum_capacity_fraction:
+                errors.append(
+                    _fade_floor_message(year, fraction, battery.minimum_capacity_fraction)
+                )
+                break
+    return tuple(errors)
+
+
 def _capacity_fade_schedule(
     dispatch: DispatchResult,
     scenario: Scenario,
@@ -199,12 +240,7 @@ def _capacity_fade_schedule(
     for year in range(1, assumptions.project_life_years + 1):
         fraction = 1 - fade_per_year * (year - 1)
         if fraction < battery.minimum_capacity_fraction:
-            raise ValueError(
-                f"the fade parameters drive the year-{year} capacity fraction to "
-                f"{fraction:.6g}, below the validated minimum_capacity_fraction of "
-                f"{battery.minimum_capacity_fraction:g}; reduce the fade parameters "
-                "or shorten project_life_years"
-            )
+            raise ValueError(_fade_floor_message(year, fraction, battery.minimum_capacity_fraction))
         fractions.append(fraction)
     return CapacityFadeSummary(
         calendar_fade_fraction_per_year=battery.calendar_fade_fraction_per_year,
@@ -224,11 +260,8 @@ def evaluate_financials(
 
     if dispatch.input_sha256 != scenario_sha256(scenario):
         raise ValueError("dispatch result does not match the supplied scenario")
-    if abs(scenario.battery.initial_soc_kwh - scenario.battery.terminal_soc_kwh) > 1e-9:
-        raise ValueError(
-            "financial evaluation requires terminal SOC to equal initial SOC; "
-            "inventory valuation is not implemented"
-        )
+    for message in financial_precondition_errors(scenario, assumptions):
+        raise ValueError(message)
 
     # A fraction of exactly 1.0 is a bit-exact multiplicative identity, so the
     # no-fade path reproduces the pre-fade cash flows and LCOS byte for byte.

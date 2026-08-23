@@ -41,9 +41,7 @@ class ValidateRunnabilityTests(unittest.TestCase):
             "inventory valuation is not implemented"
         )
         with tempfile.TemporaryDirectory() as directory:
-            scenario_path = self._scenario_with_battery(
-                Path(directory), terminal_soc_fraction=0.6
-            )
+            scenario_path = self._scenario_with_battery(Path(directory), terminal_soc_fraction=0.6)
             with self.assertRaises(SystemExit) as validated:
                 main(["validate", "--scenario", str(scenario_path)])
             output = Path(directory) / "results"
@@ -94,8 +92,7 @@ class ValidateRunnabilityTests(unittest.TestCase):
         always = [
             "solver resource limits: the optimizer may stop at its per-phase time limit "
             "without producing a dispatch",
-            "solver numerical failure: the optimizer may fail numerically or miss its "
-            "tolerances",
+            "solver numerical failure: the optimizer may fail numerically or miss its tolerances",
             "returned-solution validation: every dispatch is re-checked against the "
             "model's invariants after the solve and refused if it violates them",
         ]

@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Any, Literal
 
 from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
-from pv_bess.finance import evaluate_financials
+from pv_bess.finance import evaluate_financials, financial_precondition_errors
 from pv_bess.models import (
     DispatchResult,
     FinancialAssumptions,
@@ -373,6 +373,11 @@ def run_sensitivity(
     relative_mip_gap: float = 1e-8,
 ) -> SensitivityResult:
     """Solve the base case and every one-at-a-time variant with the unchanged kernel."""
+
+    # Every row ends in a financial evaluation, so an input-only financial
+    # refusal is raised before the base solve instead of after it.
+    for message in financial_precondition_errors(scenario, assumptions):
+        raise ValueError(message)
 
     variant_inputs = [
         (

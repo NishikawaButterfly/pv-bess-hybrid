@@ -64,9 +64,7 @@ class FinanceTests(unittest.TestCase):
         """The pre-solve precondition and the post-solve refusal are one guard."""
 
         scenario = make_scenario([2_000, 0], [10, 100])
-        scenario = replace(
-            scenario, battery=replace(scenario.battery, terminal_soc_fraction=0.4)
-        )
+        scenario = replace(scenario, battery=replace(scenario.battery, terminal_soc_fraction=0.4))
         assumptions = FinancialAssumptions(
             capex_eur=1_000,
             annual_fixed_opex_eur=10,
