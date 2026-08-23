@@ -111,6 +111,37 @@ class FinanceTests(unittest.TestCase):
         self.assertEqual((str(raised.exception),), errors)
         self.assertIn("year-7 capacity fraction to 0.4", errors[0])
 
+    def test_calendar_breach_is_a_precondition_whatever_the_cycling_fade(self) -> None:
+        """The full fade rate is the calendar rate plus a nonnegative cycling
+        contribution, so a calendar-alone breach refuses every possible
+        dispatch and must not wait for a solve."""
+
+        scenario = make_scenario([2_000, 0], [10, 100])
+        scenario = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.07,
+                cycling_fade_fraction_per_efc=0.0001,
+                minimum_capacity_fraction=0.55,
+            ),
+        )
+        assumptions = FinancialAssumptions(
+            capex_eur=1_000,
+            annual_fixed_opex_eur=10,
+            project_life_years=15,
+            discount_rate_fraction=0.08,
+            annualization_factor=365,
+        )
+        errors = financial_precondition_errors(scenario, assumptions)
+        self.assertEqual(len(errors), 1)
+        # The reported pair is the calendar-only projection; the full
+        # trajectory, with its cycling contribution, breaches at or before it.
+        self.assertIn("year-8 capacity fraction to 0.51", errors[0])
+        with self.assertRaises(ValueError) as raised:
+            evaluate_financials(optimize_dispatch(scenario), scenario, assumptions)
+        self.assertEqual(str(raised.exception), errors[0])
+
     def test_cycling_fade_is_not_a_precondition(self) -> None:
         """With cycling fade the floor depends on the solved dispatch, so the
         precondition stays silent and the run-time guard keeps the judgment."""

@@ -387,6 +387,12 @@ def run_sensitivity(
         )
         for variant in spec.variants
     ]
+    # A capacity variant rescales the SOC endpoints in kWh, so a base scenario
+    # inside the equality tolerance can leave it once resized; each variant's
+    # preconditions are as decidable as the base's, and refused as early.
+    for variant, variant_scenario, variant_assumption_set in variant_inputs:
+        for message in financial_precondition_errors(variant_scenario, variant_assumption_set):
+            raise ValueError(f"variant {variant.label!r}: {message}")
 
     base_dispatch = optimize_dispatch(
         scenario,

@@ -32,10 +32,11 @@ discharged energy are all multiplied by that year's fraction, so the NPV cash fl
 both sides of the LCOS ratio follow one trajectory.
 
 `minimum_capacity_fraction` is a validated floor. If any project year would fall below it,
-the evaluation stops rather than silently flooring. With calendar fade alone the breach is
-decidable from the inputs, so `validate` and every run surface refuse it before any solve;
-with a nonzero cycling fade the rate depends on the solved dispatch's cycling, and the
-refusal arrives after the solve:
+the evaluation stops rather than silently flooring. When the calendar component alone
+breaches the floor, the refusal is decidable from the inputs — cycling fade only adds to
+the rate — so `validate` and every run surface refuse it before any solve, whatever the
+cycling value; a breach that needs the cycling contribution depends on the solved
+dispatch and arrives after the solve:
 
 ```text
 error: the fade parameters drive the year-5 capacity fraction to 0.84, below the validated

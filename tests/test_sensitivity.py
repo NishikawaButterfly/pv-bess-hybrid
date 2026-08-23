@@ -13,7 +13,7 @@ from unittest import mock
 
 from pv_bess.cli import main
 from pv_bess.dispatch import optimize_dispatch
-from pv_bess.finance import evaluate_financials
+from pv_bess.finance import evaluate_financials, financial_precondition_errors
 from pv_bess.io import load_sensitivity_spec
 from pv_bess.models import BatteryConfig, FinancialAssumptions, GridConfig
 from pv_bess.sensitivity import (
@@ -170,6 +170,29 @@ class SensitivityRunTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "terminal SOC to equal initial SOC"),
         ):
             run_sensitivity(scenario, self.assumptions, spec)
+        self.assertEqual(solver.call_count, 0)
+
+    def test_variant_scaled_preconditions_refuse_before_any_solve(self) -> None:
+        """A capacity variant rescales the SOC endpoints in kWh, so a base
+        inside the equality tolerance can leave it once resized."""
+
+        battery = replace(
+            self.scenario.battery,
+            energy_capacity_kwh=4_000_000,
+            terminal_soc_fraction=0.5 + 1e-16,
+            initial_soc_fraction=0.5,
+        )
+        scenario = replace(self.scenario, battery=battery)
+        assumptions = self.assumptions
+        self.assertEqual(financial_precondition_errors(scenario, assumptions), ())
+        spec = _spec({"energy_capacity_kwh": {"multipliers": [4], "capex_eur_per_kwh": 250}})
+        with (
+            mock.patch("pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch) as solver,
+            self.assertRaisesRegex(
+                ValueError, r"variant 'energy_capacity_kwh\*4': financial evaluation requires"
+            ),
+        ):
+            run_sensitivity(scenario, assumptions, spec)
         self.assertEqual(solver.call_count, 0)
 
     def test_invalid_variant_scenarios_fail_before_any_solve(self) -> None:

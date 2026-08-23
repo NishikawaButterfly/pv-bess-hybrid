@@ -164,10 +164,10 @@ second, but can refuse neither.
 ### The solve itself, which validate names rather than proves
 
 A refusal that depends on the inputs alone is checked at validation time: a
-`terminal_soc_fraction` different from `initial_soc_fraction`, or a calendar-only fade
-projection that breaches `minimum_capacity_fraction`, is refused by `validate` with the
-same message the run would produce, and the run surfaces refuse it before paying for a
-solve. What remains genuinely undecidable without solving is listed by `validate` itself,
+`terminal_soc_fraction` different from `initial_soc_fraction`, or a fade projection whose
+calendar component alone breaches `minimum_capacity_fraction` — decidable whatever the
+cycling fade is, since cycling only adds to it — is refused by `validate` with the same
+message the run would produce, and the run surfaces refuse it before paying for a solve. What remains genuinely undecidable without solving is listed by `validate` itself,
 in the `not_provable_without_solving` array of its output: the solver may stop at its
 per-phase time limit, it may fail numerically, every returned dispatch is re-validated
 against the model's invariants and refused if it violates them, and — only when

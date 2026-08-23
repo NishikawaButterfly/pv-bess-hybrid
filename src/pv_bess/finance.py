@@ -191,10 +191,13 @@ def financial_precondition_errors(
     These are exactly the checks :func:`evaluate_financials` applies whose
     outcome does not depend on the solved dispatch, in the order it applies
     them, so a caller can refuse before paying for a solve with the same text
-    the run would produce. The cycling-fade capacity floor is deliberately not
-    here: with ``cycling_fade_fraction_per_efc`` above zero the fade rate
-    depends on the solved dispatch's equivalent full cycles, and only the solve
-    proves whether the floor holds.
+    the run would produce. The fade floor is checked on the calendar component
+    alone: the full fade rate is the calendar rate plus a nonnegative cycling
+    contribution, so a calendar-alone breach refuses every possible dispatch
+    whatever ``cycling_fade_fraction_per_efc`` is, and the full trajectory
+    breaches at or before the reported year. A breach that needs the cycling
+    contribution depends on the solved dispatch's equivalent full cycles and
+    stays with the run-time guard.
     """
 
     errors: list[str] = []
@@ -204,7 +207,7 @@ def financial_precondition_errors(
             "financial evaluation requires terminal SOC to equal initial SOC; "
             "inventory valuation is not implemented"
         )
-    if battery.cycling_fade_fraction_per_efc == 0 and battery.calendar_fade_fraction_per_year > 0:
+    if battery.calendar_fade_fraction_per_year > 0:
         for year in range(1, assumptions.project_life_years + 1):
             fraction = 1 - battery.calendar_fade_fraction_per_year * (year - 1)
             if fraction < battery.minimum_capacity_fraction:

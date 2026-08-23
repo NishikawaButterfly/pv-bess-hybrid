@@ -15,10 +15,14 @@ admits requires a terminal SOC target the battery cannot reach, any such target 
 from the initial SOC, and a terminal different from the initial is refused by `validate`
 and by every run surface *before* the solve, for the financial reason. A scenario that
 passes `validate` therefore always has a feasible dispatch — the idle battery, holding its
-SOC and curtailing all PV, satisfies every constraint. The causes below remain worth
-understanding: they are why the terminal-equality rule is load-bearing, and they still
-apply if you drive `optimize_dispatch` directly as a library, where an asymmetric terminal
-target is supported.
+SOC and curtailing all PV, satisfies every constraint. One residual path to this exact
+message remains, and it is not structural: on extreme-but-valid magnitudes the solver can
+fail numerically and mis-declare infeasibility of a mathematically feasible model. That is
+the solver-numerical-failure class `validate` declares in `not_provable_without_solving`,
+and rescaling the inputs is the remedy — see [chapter 24](24-solver-status.md). The causes
+below remain worth understanding: they are why the terminal-equality rule is load-bearing,
+and they still apply if you drive `optimize_dispatch` directly as a library, where an
+asymmetric terminal target is supported.
 
 ## The message tells you nothing about the cause
 
@@ -120,8 +124,9 @@ terminal SOC target.
 ## A diagnostic routine
 
 When a scenario comes back infeasible — which through the CLI, sensitivity, and the API
-should no longer happen, since the one structural cause is refused pre-solve — the routine
-for library use, or for a status-2 message you cannot explain:
+now points at solver numerics rather than scenario structure, since the one structural
+cause is refused pre-solve — the routine for library use, or for a status-2 message you
+cannot explain:
 
 1. **Check `terminal_soc_fraction` first.** If it differs from `initial_soc_fraction`, set
    them equal and re-run. This resolves most cases, and any other value is refused before

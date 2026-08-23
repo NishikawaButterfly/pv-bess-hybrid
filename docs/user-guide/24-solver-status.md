@@ -127,9 +127,9 @@ something physically wrong. Report it with the scenario attached.
 
 ## What is not a solver failure
 
-**Financial-layer rejections.** Both of these are decidable from the inputs alone, so
-`validate` refuses them and every run surface refuses them before any solve — they arrive
-instantly, not after a wait:
+**Financial-layer rejections.** These are refused before any solve whenever they are
+decidable from the inputs alone — the terminal-SOC equality always is, and the fade floor
+is whenever the calendar component alone breaches it, whatever the cycling value:
 
 ```text
 error: financial evaluation requires terminal SOC to equal initial SOC; inventory
@@ -139,10 +139,12 @@ error: the fade parameters drive the year-5 capacity fraction to 0.84, below the
 minimum_capacity_fraction of 0.85; reduce the fade parameters or shorten project_life_years
 ```
 
-The one financial rejection that still arrives after the solve is the fade floor under a
-nonzero `cycling_fade_fraction_per_efc`: the fade rate then depends on the solved
-dispatch's cycling, which is why `validate` lists it in `not_provable_without_solving`
-instead of checking it.
+The fade-floor message still arrives after the solve in one case: a nonzero
+`cycling_fade_fraction_per_efc` whose calendar component does not breach the floor on its
+own. The breach then depends on the solved dispatch's cycling, which is why `validate`
+lists that case in `not_provable_without_solving` instead of checking it. When the
+calendar component alone breaches, the pre-solve refusal reports the calendar-only year
+and fraction; the full trajectory breaches at or before them.
 
 **Option validation.** Rejected before any solve:
 
