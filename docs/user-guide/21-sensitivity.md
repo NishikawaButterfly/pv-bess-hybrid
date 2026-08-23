@@ -47,7 +47,9 @@ variant's CAPEX co-varies with its size
 
 The declared cost is a linear model. If your quotes are not linear in kWh — they rarely
 are, exactly — treat the swept rows as a first pass and price the shortlisted size as its
-own scenario.
+own scenario. A declared `0` is accepted as an explicit statement that extra capacity is
+free; it knowingly reinstates the fixed-cost comparison, so reserve it for capacity that
+is genuinely sunk.
 
 At most 32 runs including the base. Unknown parameters, duplicates, non-positive
 multipliers, and variants producing an invalid scenario are all rejected before anything is
@@ -82,11 +84,13 @@ parameter enters the optimization — while its `analysis_input_sha256` and fina
 metrics move.
 
 `sensitivity.json` carries warnings at two levels. The `warnings` array beside the table
-is the base case's judgment: a mistyped input in the scenario itself is stated once, not
-repeated on eleven rows. Each row also carries its own `warnings`, produced by the same
-kernel channel for the assumptions that row was evaluated under — so scanning
-`discount_rate_fraction` across `2` puts the percentage-typed warning on the row that
-crossed the threshold, and the CLI prints it labelled with the variant:
+is the base case's judgment. Each row also carries its own `warnings`, produced by the
+same kernel channel for the assumptions that row was evaluated under — which means a
+mistyped input in the scenario itself appears beside the table *and* on every row, because
+every row inherits the base assumptions, while a warning only a scanned value trips
+appears on that row alone. On stdout the CLI prints the base case's warnings once,
+unlabelled, and labels only what a scanned value introduced — so scanning
+`discount_rate_fraction` across `2` prints:
 
 ```text
 warning: discount_rate_fraction=2: discount_rate_fraction is 2, which the model read as
@@ -148,13 +152,15 @@ market value would move too.
 **A scanned value can carry its own warning.** The table above is clean. A scanned
 `discount_rate_fraction` above `1.0` is flagged by the same kernel channel as everywhere
 else, on the row that crossed the threshold, and printed by the CLI labelled with the
-variant; a warning the scenario's own assumptions already trip — a mistyped opex
-escalation, say — appears once beside the table instead of being repeated on every row. A
-sweep never silences a warning the equivalent standalone run would have raised.
+variant. A warning the scenario's own assumptions already trip — a mistyped opex
+escalation, say — sits beside the table and on every row, since every row inherits the
+base assumptions, and is printed once on stdout. A sweep never silences a warning the
+equivalent standalone run would have raised.
 
 ## What the layer is for, and what it is not
 
-It is a **one-at-a-time** design. Every run changes exactly one parameter; there are no
+It is a **one-at-a-time** design. Every run changes exactly one axis — a capacity variant
+carries its derived CAPEX with it, by declaration — and there are no
 combination grids. That is a deliberate scope choice and it has a consequence worth
 stating: **effects are not additive.** You cannot read the price row and the capacity row
 and infer what both together would do. For that, write the combined scenario and run it.

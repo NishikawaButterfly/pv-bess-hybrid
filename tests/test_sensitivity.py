@@ -255,6 +255,23 @@ class SensitivityFinancialAndCostTests(unittest.TestCase):
         self.assertNotEqual(doubled.dispatch_input_sha256, result.base.dispatch_input_sha256)
         self.assertNotEqual(doubled.analysis_input_sha256, result.base.analysis_input_sha256)
 
+    def test_capacity_shrink_below_zero_capex_shows_the_arithmetic(self) -> None:
+        spec = _spec(
+            {"energy_capacity_kwh": {"values": [100], "capex_eur_per_kwh": 400}}
+        )
+        with (
+            mock.patch(
+                "pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch
+            ) as solver,
+            self.assertRaises(SensitivitySpecError) as raised,
+        ):
+            run_sensitivity(self.scenario, self.assumptions, spec)
+        message = str(raised.exception)
+        # Every number the user typed is positive; only the derived CAPEX is
+        # not, so the refusal must show how it was computed.
+        self.assertIn("derives capex_eur = 1000 + (100 - 1000) * 400 = -359000", message)
+        self.assertEqual(solver.call_count, 0)
+
     def test_capex_axis_scans(self) -> None:
         spec = _spec({"capex_eur": {"multipliers": [0.5, 1.5]}})
         result = run_sensitivity(self.scenario, self.assumptions, spec)

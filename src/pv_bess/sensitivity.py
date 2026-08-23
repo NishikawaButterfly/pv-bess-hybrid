@@ -303,28 +303,40 @@ def variant_assumptions(
     resized battery is priced as resized instead of inheriting the base cost.
     """
 
-    try:
-        if variant.parameter == "capex_eur":
-            return replace(assumptions, capex_eur=_resolved(assumptions.capex_eur, variant))
-        if variant.parameter == "discount_rate_fraction":
-            return replace(
-                assumptions,
-                discount_rate_fraction=_resolved(assumptions.discount_rate_fraction, variant),
-            )
-        if variant.parameter == _CAPACITY_PARAMETER:
-            # The variant constructor refuses capacity variants without a cost.
-            assert variant.capex_eur_per_kwh is not None
-            base_kwh = scenario.battery.energy_capacity_kwh
-            delta_kwh = _resolved(base_kwh, variant) - base_kwh
-            return replace(
-                assumptions,
-                capex_eur=assumptions.capex_eur + delta_kwh * variant.capex_eur_per_kwh,
-            )
-        return assumptions
-    except ValueError as exc:
-        raise SensitivitySpecError(
-            f"variant {variant.label!r} produces invalid financial assumptions: {exc}"
-        ) from exc
+    if variant.parameter == "capex_eur":
+        capex = _resolved(assumptions.capex_eur, variant)
+        try:
+            return replace(assumptions, capex_eur=capex)
+        except ValueError as exc:
+            raise SensitivitySpecError(
+                f"variant {variant.label!r} sets capex_eur = {capex:g}, which is invalid: {exc}"
+            ) from exc
+    if variant.parameter == "discount_rate_fraction":
+        rate = _resolved(assumptions.discount_rate_fraction, variant)
+        try:
+            return replace(assumptions, discount_rate_fraction=rate)
+        except ValueError as exc:
+            raise SensitivitySpecError(
+                f"variant {variant.label!r} sets discount_rate_fraction = {rate:g}, "
+                f"which is invalid: {exc}"
+            ) from exc
+    if variant.parameter == _CAPACITY_PARAMETER:
+        # The variant constructor refuses capacity variants without a cost.
+        assert variant.capex_eur_per_kwh is not None
+        base_kwh = scenario.battery.energy_capacity_kwh
+        new_kwh = _resolved(base_kwh, variant)
+        capex = assumptions.capex_eur + (new_kwh - base_kwh) * variant.capex_eur_per_kwh
+        try:
+            return replace(assumptions, capex_eur=capex)
+        except ValueError as exc:
+            # The refused value is derived, not typed, so show the arithmetic:
+            # every input the user wrote may be positive while the result is not.
+            raise SensitivitySpecError(
+                f"variant {variant.label!r} derives capex_eur = {assumptions.capex_eur:g} "
+                f"+ ({new_kwh:g} - {base_kwh:g}) * {variant.capex_eur_per_kwh:g} "
+                f"= {capex:g}, which is invalid: {exc}"
+            ) from exc
+    return assumptions
 
 
 def _run_metrics(
