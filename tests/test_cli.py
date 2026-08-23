@@ -18,6 +18,159 @@ _SERVE_STACK_AVAILABLE = all(
 ) and any(find_spec(name) is not None for name in ("python_multipart", "multipart"))
 
 
+class ValidateRunnabilityTests(unittest.TestCase):
+    """validate implies runnability, or names precisely what it cannot prove."""
+
+    def setUp(self) -> None:
+        self.sample = Path(__file__).resolve().parents[1] / "sample-data" / "scenario.json"
+
+    def _scenario_with_battery(self, directory: Path, **overrides: float) -> Path:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["battery"].update(overrides)
+        scenario_path = directory / "scenario.json"
+        scenario_path.write_text(json.dumps(payload), encoding="utf-8")
+        (directory / "hourly.csv").write_text(
+            self.sample.with_name("hourly.csv").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return scenario_path
+
+    def test_the_issues_terminal_soc_case_is_caught_or_declared(self) -> None:
+        expected = (
+            "error: financial evaluation requires terminal SOC to equal initial SOC; "
+            "inventory valuation is not implemented"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_battery(
+                Path(directory), terminal_soc_fraction=0.6
+            )
+            with self.assertRaises(SystemExit) as validated:
+                main(["validate", "--scenario", str(scenario_path)])
+            output = Path(directory) / "results"
+            with (
+                patch("pv_bess.cli.optimize_dispatch") as solver,
+                self.assertRaises(SystemExit) as ran,
+            ):
+                main(["run", "--scenario", str(scenario_path), "--output", str(output)])
+            # validate and run refuse with the run's own message, and run no
+            # longer pays for a solve to discover it.
+            self.assertEqual(str(validated.exception), expected)
+            self.assertEqual(str(ran.exception), expected)
+            self.assertEqual(solver.call_count, 0)
+            self.assertFalse(output.exists())
+
+    def test_validate_refuses_the_calendar_fade_floor_the_run_would_refuse(self) -> None:
+        expected = (
+            "error: the fade parameters drive the year-7 capacity fraction to 0.4, below "
+            "the validated minimum_capacity_fraction of 0.5; reduce the fade parameters "
+            "or shorten project_life_years"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_battery(
+                Path(directory),
+                calendar_fade_fraction_per_year=0.1,
+                minimum_capacity_fraction=0.5,
+            )
+            with self.assertRaises(SystemExit) as validated:
+                main(["validate", "--scenario", str(scenario_path)])
+            with (
+                patch("pv_bess.cli.optimize_dispatch") as solver,
+                self.assertRaises(SystemExit) as ran,
+            ):
+                main(
+                    [
+                        "run",
+                        "--scenario",
+                        str(scenario_path),
+                        "--output",
+                        str(Path(directory) / "results"),
+                    ]
+                )
+        self.assertEqual(str(validated.exception), expected)
+        self.assertEqual(str(ran.exception), expected)
+        self.assertEqual(solver.call_count, 0)
+
+    def test_validate_names_what_it_cannot_prove(self) -> None:
+        always = [
+            "solver resource limits: the optimizer may stop at its per-phase time limit "
+            "without producing a dispatch",
+            "solver numerical failure: the optimizer may fail numerically or miss its "
+            "tolerances",
+            "returned-solution validation: every dispatch is re-checked against the "
+            "model's invariants after the solve and refused if it violates them",
+        ]
+        output = StringIO()
+        with redirect_stdout(output):
+            status = main(["validate", "--scenario", str(self.sample)])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(status, 0)
+        self.assertEqual(payload["not_provable_without_solving"], always)
+
+        with tempfile.TemporaryDirectory() as directory:
+            scenario_path = self._scenario_with_battery(
+                Path(directory), cycling_fade_fraction_per_efc=0.0001
+            )
+            cycling_output = StringIO()
+            with redirect_stdout(cycling_output):
+                cycling_status = main(["validate", "--scenario", str(scenario_path)])
+        cycling_payload = json.loads(cycling_output.getvalue())
+        self.assertEqual(cycling_status, 0)
+        self.assertEqual(
+            cycling_payload["not_provable_without_solving"],
+            [
+                *always,
+                "capacity-fade floor: with cycling_fade_fraction_per_efc above zero, the "
+                "year-by-year capacity floor depends on the solved dispatch's cycling and "
+                "only the solve proves it holds",
+            ],
+        )
+
+    def test_bundled_samples_still_validate_and_run(self) -> None:
+        spec = self.sample.with_name("sensitivity-spec.json")
+        validate_output = StringIO()
+        with redirect_stdout(validate_output):
+            self.assertEqual(main(["validate", "--scenario", str(self.sample)]), 0)
+        payload = json.loads(validate_output.getvalue())
+        self.assertEqual(payload["status"], "valid")
+        self.assertIn("not_provable_without_solving", payload)
+        with tempfile.TemporaryDirectory() as directory:
+            run_output = Path(directory) / "run"
+            sensitivity_output = Path(directory) / "sensitivity"
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "run",
+                            "--scenario",
+                            str(self.sample),
+                            "--output",
+                            str(run_output),
+                            "--time-limit",
+                            "10",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "sensitivity",
+                            "--scenario",
+                            str(self.sample),
+                            "--spec",
+                            str(spec),
+                            "--output",
+                            str(sensitivity_output),
+                            "--time-limit",
+                            "10",
+                        ]
+                    ),
+                    0,
+                )
+            self.assertTrue((run_output / "summary.json").exists())
+            self.assertTrue((sensitivity_output / "sensitivity.json").exists())
+
+
 class CommandLineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sample = Path(__file__).resolve().parents[1] / "sample-data" / "scenario.json"

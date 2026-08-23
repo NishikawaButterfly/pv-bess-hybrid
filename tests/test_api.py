@@ -169,6 +169,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("minimum_soc_fraction", response.json()["detail"])
 
+    def test_terminal_soc_precondition_is_rejected_before_any_solve(self) -> None:
+        payload = json.loads(self.sample.read_text(encoding="utf-8"))
+        payload["battery"]["terminal_soc_fraction"] = 0.6
+        with unittest.mock.patch("pv_bess.api.optimize_dispatch") as solver:
+            response = self.client.post(
+                "/api/v1/dispatch",
+                files=self._files(json.dumps(payload).encode("utf-8")),
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("terminal SOC to equal initial SOC", response.json()["detail"])
+        self.assertEqual(solver.call_count, 0)
+
     def test_oversized_scenario_upload_is_rejected_with_413(self) -> None:
         response = self.client.post(
             "/api/v1/dispatch",

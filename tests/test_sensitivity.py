@@ -160,6 +160,18 @@ class SensitivityRunTests(unittest.TestCase):
         self.assertEqual(priced.intervals[1].pv_power_kw, 0)
         self.assertEqual(priced.battery, self.scenario.battery)
 
+    def test_financial_preconditions_refuse_before_any_solve(self) -> None:
+        scenario = replace(
+            self.scenario, battery=replace(self.scenario.battery, terminal_soc_fraction=0.25)
+        )
+        spec = _spec({"market_price_level": {"multipliers": [1.2]}})
+        with (
+            mock.patch("pv_bess.sensitivity.optimize_dispatch", wraps=optimize_dispatch) as solver,
+            self.assertRaisesRegex(ValueError, "terminal SOC to equal initial SOC"),
+        ):
+            run_sensitivity(scenario, self.assumptions, spec)
+        self.assertEqual(solver.call_count, 0)
+
     def test_invalid_variant_scenarios_fail_before_any_solve(self) -> None:
         spec = _spec({"charge_efficiency": {"multipliers": [1.5]}})
         with self.assertRaisesRegex(SensitivitySpecError, "produces an invalid scenario"):
