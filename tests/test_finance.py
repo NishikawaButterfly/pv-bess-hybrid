@@ -10,6 +10,7 @@ from pv_bess.finance import (
     PERCENTAGE_LIKE_RATE_THRESHOLD,
     assumption_warnings,
     evaluate_financials,
+    financial_precondition_errors,
     internal_rate_of_return,
     net_present_value,
 )
@@ -58,6 +59,110 @@ class FinanceTests(unittest.TestCase):
         assumptions = FinancialAssumptions(0, 0, 1, 0)
         with self.assertRaisesRegex(ValueError, "does not match"):
             evaluate_financials(dispatch, second, assumptions)
+
+    def test_the_run_refusal_text_is_the_precondition_text(self) -> None:
+        """The pre-solve precondition and the post-solve refusal are one guard."""
+
+        scenario = make_scenario([2_000, 0], [10, 100])
+        scenario = replace(scenario, battery=replace(scenario.battery, terminal_soc_fraction=0.4))
+        assumptions = FinancialAssumptions(
+            capex_eur=1_000,
+            annual_fixed_opex_eur=10,
+            project_life_years=5,
+            discount_rate_fraction=0.08,
+            annualization_factor=365,
+        )
+        errors = financial_precondition_errors(scenario, assumptions)
+        self.assertEqual(
+            errors,
+            (
+                "financial evaluation requires terminal SOC to equal initial SOC; "
+                "inventory valuation is not implemented",
+            ),
+        )
+        # The dispatch itself supports the asymmetric target; only the
+        # financial layer refuses it, with exactly the precondition's text.
+        dispatch = optimize_dispatch(scenario)
+        with self.assertRaises(ValueError) as raised:
+            evaluate_financials(dispatch, scenario, assumptions)
+        self.assertEqual(str(raised.exception), errors[0])
+
+    def test_the_calendar_fade_floor_precondition_matches_the_run_text(self) -> None:
+        scenario = make_scenario([2_000, 0], [10, 100])
+        scenario = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.1,
+                minimum_capacity_fraction=0.5,
+            ),
+        )
+        assumptions = FinancialAssumptions(
+            capex_eur=1_000,
+            annual_fixed_opex_eur=10,
+            project_life_years=15,
+            discount_rate_fraction=0.08,
+            annualization_factor=365,
+        )
+        errors = financial_precondition_errors(scenario, assumptions)
+        dispatch = optimize_dispatch(scenario)
+        with self.assertRaises(ValueError) as raised:
+            evaluate_financials(dispatch, scenario, assumptions)
+        self.assertEqual((str(raised.exception),), errors)
+        self.assertIn("year-7 capacity fraction to 0.4", errors[0])
+
+    def test_calendar_breach_is_a_precondition_whatever_the_cycling_fade(self) -> None:
+        """The full fade rate is the calendar rate plus a nonnegative cycling
+        contribution, so a calendar-alone breach refuses every possible
+        dispatch and must not wait for a solve."""
+
+        scenario = make_scenario([2_000, 0], [10, 100])
+        scenario = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                calendar_fade_fraction_per_year=0.07,
+                cycling_fade_fraction_per_efc=0.0001,
+                minimum_capacity_fraction=0.55,
+            ),
+        )
+        assumptions = FinancialAssumptions(
+            capex_eur=1_000,
+            annual_fixed_opex_eur=10,
+            project_life_years=15,
+            discount_rate_fraction=0.08,
+            annualization_factor=365,
+        )
+        errors = financial_precondition_errors(scenario, assumptions)
+        self.assertEqual(len(errors), 1)
+        # The reported pair is the calendar-only projection; the full
+        # trajectory, with its cycling contribution, breaches at or before it.
+        self.assertIn("year-8 capacity fraction to 0.51", errors[0])
+        with self.assertRaises(ValueError) as raised:
+            evaluate_financials(optimize_dispatch(scenario), scenario, assumptions)
+        self.assertEqual(str(raised.exception), errors[0])
+
+    def test_cycling_fade_is_not_a_precondition(self) -> None:
+        """With cycling fade the floor depends on the solved dispatch, so the
+        precondition stays silent and the run-time guard keeps the judgment."""
+
+        scenario = make_scenario([2_000, 0], [10, 100])
+        scenario = replace(
+            scenario,
+            battery=replace(
+                scenario.battery,
+                cycling_fade_fraction_per_efc=0.1,
+                minimum_capacity_fraction=0.5,
+            ),
+        )
+        assumptions = FinancialAssumptions(
+            capex_eur=1_000,
+            annual_fixed_opex_eur=10,
+            project_life_years=15,
+            discount_rate_fraction=0.08,
+            annualization_factor=365,
+        )
+        self.assertEqual(financial_precondition_errors(scenario, assumptions), ())
 
     def test_analysis_hash_changes_with_financial_assumptions(self) -> None:
         scenario = make_scenario([2_000, 0], [20, 100])

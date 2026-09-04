@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from pv_bess.dispatch import DispatchOptimizationError, _highs_backend_version, optimize_dispatch
-from pv_bess.finance import evaluate_financials
+from pv_bess.finance import evaluate_financials, financial_precondition_errors
 from pv_bess.io import (
     _MAX_SCENARIO_BYTES,
     _MAX_TIME_SERIES_BYTES,
@@ -158,6 +158,9 @@ def _run_uploaded_scenario(scenario_bytes: bytes, time_series_bytes: bytes) -> d
         scenario_path.write_bytes(scenario_bytes)
 
         scenario, financial_assumptions = load_scenario(scenario_path)
+        # The same 422 the financial layer would produce, before the solve.
+        for message in financial_precondition_errors(scenario, financial_assumptions):
+            raise ValueError(message)
         dispatch = optimize_dispatch(scenario)
         financial = evaluate_financials(dispatch, scenario, financial_assumptions)
         summary_path, _ = write_results(results_directory, dispatch, financial)

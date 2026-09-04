@@ -127,11 +127,9 @@ something physically wrong. Report it with the scenario attached.
 
 ## What is not a solver failure
 
-Two error classes are easy to mistake for solve problems because they arrive after a long
-wait:
-
-**Financial-layer rejections.** The solve succeeded and the financial evaluation refused
-the result:
+**Financial-layer rejections.** These are refused before any solve whenever they are
+decidable from the inputs alone — the terminal-SOC equality always is, and the fade floor
+is whenever the calendar component alone breaches it, whatever the cycling value:
 
 ```text
 error: financial evaluation requires terminal SOC to equal initial SOC; inventory
@@ -140,6 +138,13 @@ valuation is not implemented
 error: the fade parameters drive the year-5 capacity fraction to 0.84, below the validated
 minimum_capacity_fraction of 0.85; reduce the fade parameters or shorten project_life_years
 ```
+
+The fade-floor message still arrives after the solve in one case: a nonzero
+`cycling_fade_fraction_per_efc` whose calendar component does not breach the floor on its
+own. The breach then depends on the solved dispatch's cycling, which is why `validate`
+lists that case in `not_provable_without_solving` instead of checking it. When the
+calendar component alone breaches, the pre-solve refusal reports the calendar-only year
+and fraction; the full trajectory breaches at or before them.
 
 **Option validation.** Rejected before any solve:
 
@@ -156,7 +161,7 @@ Measured on the guide's reference machine, wall clock including interpreter star
 | --- | ---: | ---: |
 | Sample day | 24 | 3.3 s |
 | Synthetic month | 744 | 2.7 s |
-| Sensitivity, 7 runs of 24 intervals | 168 total | 2.4 s |
+| Sensitivity, 11 rows over 24 intervals (7 solves; financial rows share the base solve) | 168 solved | 2.1 s |
 
 The published per-phase benchmarks give the shape beyond that: 2.75 s at a quarter, 22.5 s
 at half a year, and an unreliable 191 s at a full year.

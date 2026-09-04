@@ -35,8 +35,8 @@ The interval duration is inferred in UTC from the first two timestamps. The last
 - discharge efficiency: stored DC energy to exported AC energy;
 - `degradation_cost_eur_per_mwh_dc_discharged`: economic reserve applied to DC energy removed from storage, not a physical degradation model;
 - `calendar_fade_fraction_per_year` and `cycling_fade_fraction_per_efc`: optional multi-year usable-capacity fade as fractions of the original usable energy per year and per equivalent full cycle; zero (the default) reproduces earlier results and hashes exactly;
-- `minimum_capacity_fraction`: validated capacity floor; financial evaluation fails with a clear error when the fade parameters imply crossing it within the project life;
-- terminal SOC defaults to initial SOC when omitted; financial evaluation requires equality until explicit inventory valuation is implemented.
+- `minimum_capacity_fraction`: validated capacity floor; crossing it within the project life fails with a clear error — before any solve when the calendar component alone implies the crossing, after the solve when it needs the cycling contribution the solved dispatch determines;
+- terminal SOC defaults to initial SOC when omitted; the financial layer requires equality until explicit inventory valuation is implemented, and `validate` and every run surface refuse an unequal pair before any solve.
 
 If only round-trip efficiency is known, it must not be copied into both directional fields. A derived split such as the square root requires an explicit documented assumption.
 

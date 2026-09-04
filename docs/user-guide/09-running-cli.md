@@ -43,17 +43,31 @@ pv-bess validate --scenario sample-data/scenario.json
   "dispatch_input_sha256": "76d3d912a674c9b8b6ef8bc8df9e423ed5f544830fe97a3058ef1939d769b491",
   "interval_count": 24,
   "interval_hours": 1.0,
+  "not_provable_without_solving": [
+    "solver resource limits: the optimizer may stop at its per-phase time limit without producing a dispatch",
+    "solver numerical failure: the optimizer may fail numerically or miss its tolerances",
+    "returned-solution validation: every dispatch is re-checked against the model's invariants after the solve and refused if it violates them"
+  ],
   "scenario": "Synthetic 5 MW PV plus 5 MW / 20 MWh BESS",
   "status": "valid",
   "warnings": []
 }
 ```
 
-Costs nothing, catches most input mistakes, and gives you the hashes before you commit to a
-long solve. `warnings` is empty when nothing looks mistyped; a non-empty array names an
-input that is inside its validated range but probably wrong, such as a discount rate
-entered as a percentage. What `status: valid` still does not promise is covered in
+Costs nothing, catches every input mistake that is decidable without solving — including
+the financial layer's refusals, with the same message the run would produce — and gives
+you the hashes before you commit to a long solve. `warnings` is empty when nothing looks
+mistyped; a non-empty array names an input that is inside its validated range but probably
+wrong, such as a discount rate entered as a percentage. `not_provable_without_solving`
+names the failure classes only a solve can rule out; a fourth entry appears when
+`cycling_fade_fraction_per_efc` is above zero, because the capacity-fade floor then
+depends on the solved dispatch. What `status: valid` still does not promise is covered in
 [the data contract chapter](04-data-contract-in-practice.md#two-things-status-valid-does-not-mean).
+
+Exit codes: `0` — the scenario is valid; `1` — the scenario is refused, whether the file
+is unreadable, a value is out of its domain, or a financial precondition fails; `2` — the
+command line itself is malformed (argparse usage errors). `run` keeps its own exit codes
+unchanged.
 
 ## Run
 

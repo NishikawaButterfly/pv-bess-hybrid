@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Any, Literal
 
 from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
-from pv_bess.finance import evaluate_financials
+from pv_bess.finance import evaluate_financials, financial_precondition_errors
 from pv_bess.models import (
     DispatchResult,
     FinancialAssumptions,
@@ -374,6 +374,11 @@ def run_sensitivity(
 ) -> SensitivityResult:
     """Solve the base case and every one-at-a-time variant with the unchanged kernel."""
 
+    # Every row ends in a financial evaluation, so an input-only financial
+    # refusal is raised before the base solve instead of after it.
+    for message in financial_precondition_errors(scenario, assumptions):
+        raise ValueError(message)
+
     variant_inputs = [
         (
             variant,
@@ -382,6 +387,12 @@ def run_sensitivity(
         )
         for variant in spec.variants
     ]
+    # A capacity variant rescales the SOC endpoints in kWh, so a base scenario
+    # inside the equality tolerance can leave it once resized; each variant's
+    # preconditions are as decidable as the base's, and refused as early.
+    for variant, variant_scenario, variant_assumption_set in variant_inputs:
+        for message in financial_precondition_errors(variant_scenario, variant_assumption_set):
+            raise ValueError(f"variant {variant.label!r}: {message}")
 
     base_dispatch = optimize_dispatch(
         scenario,

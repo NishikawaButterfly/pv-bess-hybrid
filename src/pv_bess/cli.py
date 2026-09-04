@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import NoReturn
 
 from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
-from pv_bess.finance import assumption_warnings, evaluate_financials
+from pv_bess.finance import (
+    assumption_warnings,
+    evaluate_financials,
+    financial_precondition_errors,
+)
 from pv_bess.io import (
     ScenarioFileError,
     load_scenario,
@@ -66,6 +70,23 @@ def _fail(message: str) -> NoReturn:
     raise SystemExit(f"error: {message}")
 
 
+# What a clean validate still cannot promise about the run. The first three
+# are properties of the solver, not of any scenario; the fourth applies only
+# when cycling fade ties the capacity floor to the solved dispatch.
+_NOT_PROVABLE_WITHOUT_SOLVING = (
+    "solver resource limits: the optimizer may stop at its per-phase time limit "
+    "without producing a dispatch",
+    "solver numerical failure: the optimizer may fail numerically or miss its tolerances",
+    "returned-solution validation: every dispatch is re-checked against the "
+    "model's invariants after the solve and refused if it violates them",
+)
+_CYCLING_FADE_NOT_PROVABLE = (
+    "capacity-fade floor: with cycling_fade_fraction_per_efc above zero, the "
+    "year-by-year capacity floor depends on the solved dispatch's cycling and "
+    "only the solve proves it holds"
+)
+
+
 def _print_warnings(warnings: Sequence[str]) -> None:
     """Print kernel warnings first, so they are not scrolled away by the paths."""
 
@@ -119,7 +140,16 @@ def main(argv: list[str] | None = None) -> int:
         return _export_xlsx(args.input, args.output, force=args.force)
     try:
         scenario, financial_assumptions = load_scenario(args.scenario)
+        # The financial layer's input-only refusals are decidable here, so no
+        # command pays for a solve to discover one; validate and run speak the
+        # same text because it is the same guard.
+        precondition_errors = financial_precondition_errors(scenario, financial_assumptions)
         if args.command == "validate":
+            if precondition_errors:
+                _fail(precondition_errors[0])
+            not_provable = list(_NOT_PROVABLE_WITHOUT_SOLVING)
+            if scenario.battery.cycling_fade_fraction_per_efc > 0:
+                not_provable.append(_CYCLING_FADE_NOT_PROVABLE)
             print(
                 json.dumps(
                     {
@@ -132,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                         # Inside the JSON document, not as a separate line:
                         # validate speaks one parseable object and nothing else.
                         "warnings": list(assumption_warnings(financial_assumptions)),
+                        "not_provable_without_solving": not_provable,
                     },
                     indent=2,
                     sort_keys=True,
@@ -162,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"base_analysis_input_sha256: {result.base.analysis_input_sha256}")
             return 0
 
+        if precondition_errors:
+            _fail(precondition_errors[0])
         dispatch = optimize_dispatch(
             scenario,
             time_limit_seconds=args.time_limit,
