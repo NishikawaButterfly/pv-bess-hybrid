@@ -6,7 +6,9 @@ import csv
 import json
 import os
 import shutil
+import stat
 import tempfile
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -328,20 +330,37 @@ def _reserve_backup_path(path: Path) -> Path:
     return backup_path
 
 
-def _remove_path(path: Path) -> None:
-    """Remove a published, staged, or backup artifact, whether a file or a directory."""
+def _clear_read_only(function: Callable[..., object], path: str, _error: BaseException) -> None:
+    """Let :func:`shutil.rmtree` remove a read-only entry, which Windows otherwise refuses."""
+
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove a directory this module staged, published, or moved aside, or a file in its place."""
 
     if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
+        shutil.rmtree(path, onexc=_clear_read_only)
     else:
         path.unlink(missing_ok=True)
 
 
-def _stage_directory(target: Path, files: tuple[tuple[str, str], ...]) -> Path:
+def _write_new_text(path: Path, content: str) -> None:
+    """Create ``path`` and write ``content`` durably, as :func:`_stage_text` does."""
+
+    with path.open("x", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _stage_directory(target: Path, files: Iterable[tuple[str, str]]) -> Path:
     """Write every file into a fresh hidden directory beside ``target``.
 
-    Each file is written by :func:`_stage_text`, the same way a published file
-    is, so a staged directory holds exactly the bytes it will publish.
+    The directory is private to this publication, so each file is created under
+    its final name, keeping staged paths as short as possible; files are taken
+    one at a time, so a caller can render each only when it is written.
     """
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -350,29 +369,40 @@ def _stage_directory(target: Path, files: tuple[tuple[str, str], ...]) -> Path:
     )
     try:
         for name, content in files:
-            _stage_text(staged / name, content).replace(staged / name)
+            _write_new_text(staged / name, content)
     except Exception:
-        shutil.rmtree(staged, ignore_errors=True)
+        with suppress(OSError):
+            _remove_tree(staged)
         raise
     return staged
 
 
 def _publish_text_pair(
     artifacts: tuple[tuple[Path, str], ...],
-    directories: tuple[tuple[Path, tuple[tuple[str, str], ...]], ...] = (),
+    directories: tuple[tuple[Path, Iterable[tuple[str, str]]], ...] = (),
 ) -> None:
     """Stage all artifacts, publish them together, and restore the prior set on failure.
 
     ``directories`` are published whole and after the files: each is written
     into a hidden staging directory and swapped into place, so a directory
-    appears complete or not at all, and one it replaces leaves none of its
-    old files behind.
+    appears complete or not at all, and one it replaces is removed with it.
+    Only those directories are ever removed recursively; every file target is
+    handled exactly as it always was, so whatever occupies a file target's
+    name is moved aside, never deleted recursively.
     """
 
     staged: dict[Path, Path] = {}
     backups: dict[Path, Path] = {}
     published: set[Path] = set()
+    trees = {target for target, _ in directories}
     targets = (*(target for target, _ in artifacts), *(target for target, _ in directories))
+
+    def discard(target: Path, path: Path) -> None:
+        if target in trees:
+            _remove_tree(path)
+        else:
+            path.unlink(missing_ok=True)
+
     try:
         for target, content in artifacts:
             staged[target] = _stage_text(target, content)
@@ -380,7 +410,8 @@ def _publish_text_pair(
             staged[target] = _stage_directory(target, files)
 
         for target in targets:
-            if target.exists():
+            # A directory target may be a link; lexists sees a dangling one.
+            if os.path.lexists(target) if target in trees else target.exists():
                 backup = _reserve_backup_path(target)
                 target.replace(backup)
                 backups[target] = backup
@@ -392,15 +423,15 @@ def _publish_text_pair(
         rollback_errors: list[OSError] = []
         for target in published.difference(backups):
             try:
-                _remove_path(target)
+                discard(target, target)
             except OSError as exc:
                 rollback_errors.append(exc)
         for target, backup in reversed(tuple(backups.items())):
             try:
                 # A file backup overwrites its published successor in one step;
                 # a directory cannot be replaced onto, so its successor goes first.
-                if target in published and target.is_dir():
-                    _remove_path(target)
+                if target in published and target in trees:
+                    _remove_tree(target)
                 backup.replace(target)
             except OSError as exc:
                 rollback_errors.append(exc)
@@ -411,13 +442,13 @@ def _publish_text_pair(
             ) from publication_error
         raise
     else:
-        for backup in backups.values():
+        for target, backup in backups.items():
             with suppress(OSError):
-                _remove_path(backup)
+                discard(target, backup)
     finally:
-        for temporary_path in staged.values():
+        for target, temporary_path in staged.items():
             with suppress(OSError):
-                _remove_path(temporary_path)
+                discard(target, temporary_path)
 
 
 def _render_dispatch_csv(dispatch: DispatchResult, analysis_input_sha256: str) -> str:
@@ -562,10 +593,10 @@ def write_sensitivity_results(
     json_path = output / "sensitivity.json"
     csv_path = output / "sensitivity.csv"
     schedules_path = output / _SCHEDULES_DIRECTORY
-    candidates = (
-        (json_path, csv_path, schedules_path) if result.schedules else (json_path, csv_path)
-    )
-    existing_targets = [path for path in candidates if path.exists()]
+    existing_targets = [path for path in (json_path, csv_path) if path.exists()]
+    # lexists, not exists: a dangling link named schedules still occupies the name.
+    if result.schedules and os.path.lexists(schedules_path):
+        existing_targets.append(schedules_path)
     if existing_targets and not force:
         names = ", ".join(
             f"{path.name}/" if path == schedules_path else path.name for path in existing_targets
@@ -651,7 +682,8 @@ def write_sensitivity_results(
             writer.writerow(row)
         buffer.seek(0)
         csv_content = buffer.read()
-    schedules = tuple(
+    # Rendered one at a time as each file is written, never all at once.
+    schedules = (
         (
             f"{schedule.analysis_input_sha256}.csv",
             _render_dispatch_csv(schedule.dispatch, schedule.analysis_input_sha256),
@@ -663,6 +695,6 @@ def write_sensitivity_results(
             (json_path, json_content),
             (csv_path, csv_content),
         ),
-        ((schedules_path, schedules),) if schedules else (),
+        ((schedules_path, schedules),) if result.schedules else (),
     )
     return json_path, csv_path

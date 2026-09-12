@@ -147,9 +147,11 @@ class RetainedSchedule:
     """The dispatch behind one distinct run, kept so its schedule can be published.
 
     Keyed by the analysis hash, which covers the scenario and the financial
-    assumptions and therefore every byte of the dispatch.csv ``pv-bess run``
-    writes for them. A financial-only variant shares the base dispatch but not
-    its analysis hash, so it keeps a schedule of its own.
+    assumptions. Under one solver configuration (every run of a sensitivity
+    uses the same time limit and MIP gap) those decide every byte of the
+    dispatch.csv ``pv-bess run`` writes for them. A financial-only variant
+    shares the base dispatch but not its analysis hash, so it keeps a schedule
+    of its own.
     """
 
     analysis_input_sha256: str
@@ -399,6 +401,7 @@ def run_sensitivity(
     """
 
     retained: dict[str, RetainedSchedule] = {}
+    first_label: dict[str, str] = {}
 
     def retain(label: str, dispatch: DispatchResult, financial: FinancialResult) -> None:
         if not retain_schedules:
@@ -407,12 +410,16 @@ def run_sensitivity(
         kept = retained.get(key)
         if kept is None:
             retained[key] = RetainedSchedule(analysis_input_sha256=key, dispatch=dispatch)
+            first_label[key] = label
         elif kept.dispatch.intervals != dispatch.intervals:
             # Identical inputs share one schedule file. If the solver answered
-            # them differently, no single file is true for both rows.
+            # them differently, no single file is true for both rows. Only a
+            # physical row repeating earlier inputs can reach this: financial-only
+            # rows reuse the base dispatch object and are never re-solved.
             raise DispatchOptimizationError(
-                f"variant {label!r} has the same analysis inputs as an earlier run but a "
-                "different schedule, so no single schedule can be retained for both"
+                f"variant {label!r} has the same analysis inputs as {first_label[key]!r} but "
+                "the solver returned a different schedule, so no single schedule can be "
+                "retained for both"
             )
 
     # Every row ends in a financial evaluation, so an input-only financial

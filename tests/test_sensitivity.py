@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -903,21 +904,21 @@ class SensitivityScheduleRetentionTests(unittest.TestCase):
     def test_a_failure_while_writing_schedules_publishes_nothing(self) -> None:
         import pv_bess.io as io_module
 
-        original = io_module._stage_text
+        original = io_module._write_new_text
         schedules_written: list[str] = []
 
-        def failing(path: Path, content: str) -> Path:
+        def failing(path: Path, content: str) -> None:
             if re.fullmatch(r"[0-9a-f]{64}\.csv", path.name):
                 schedules_written.append(path.name)
                 if len(schedules_written) == 2:
                     raise OSError("simulated failure while writing a schedule")
-            return original(path, content)
+            original(path, content)
 
         spec = self._spec_file("price", {"market_price_level": {"multipliers": [0.8, 1.2]}})
         output = self.work / "sensitivity"
         try:
             with (
-                mock.patch("pv_bess.io._stage_text", side_effect=failing),
+                mock.patch("pv_bess.io._write_new_text", side_effect=failing),
                 redirect_stdout(StringIO()),
                 redirect_stderr(StringIO()),
                 self.assertRaisesRegex(OSError, "simulated failure while writing a schedule"),
@@ -999,9 +1000,56 @@ class SensitivityScheduleRetentionTests(unittest.TestCase):
         )
         with (
             mock.patch("pv_bess.sensitivity.optimize_dispatch", side_effect=[base, diverging]),
-            self.assertRaisesRegex(DispatchOptimizationError, "same analysis inputs"),
+            self.assertRaisesRegex(
+                DispatchOptimizationError, "same analysis inputs as 'base' but the solver"
+            ),
         ):
             run_sensitivity(scenario, assumptions, spec, retain_schedules=True)
+
+    def test_a_forced_replacement_removes_read_only_files_of_the_old_schedules(self) -> None:
+        output = self.work / "sensitivity"
+        first = self._spec_file("first", {"market_price_level": {"multipliers": [1.2]}})
+        second = self._spec_file("second", {"capex_eur": {"multipliers": [0.8]}})
+        self._sensitivity(first, output, "--retain-schedules")
+        for schedule in (output / "schedules").iterdir():
+            schedule.chmod(stat.S_IREAD)
+        self._sensitivity(second, output, "--retain-schedules", "--force")
+        # Replaced whole: exactly the new files, and no hidden backup left behind.
+        expected = {Path(row["schedule_file"]).name for row in self._rows(output)}
+        self.assertEqual({path.name for path in (output / "schedules").iterdir()}, expected)
+        self.assertEqual(
+            sorted(path.name for path in output.iterdir()),
+            ["schedules", "sensitivity.csv", "sensitivity.json"],
+        )
+
+    def test_a_forced_publish_never_deletes_what_occupies_a_table_file_name(self) -> None:
+        # Whatever sits where a table file goes is moved aside, as it always was:
+        # only schedules/ itself is ever removed recursively.
+        for name, extra in (("sensitivity.json", ("--retain-schedules",)), ("dispatch.csv", ())):
+            with self.subTest(target=name):
+                output = self.work / f"occupied-{len(extra)}"
+                (output / name).mkdir(parents=True)
+                (output / name / "user-notes.txt").write_text("keep me", encoding="utf-8")
+                if name == "dispatch.csv":
+                    arguments = [
+                        "run",
+                        "--scenario",
+                        str(self.scenario),
+                        "--output",
+                        str(output),
+                        "--time-limit",
+                        "10",
+                        "--force",
+                    ]
+                else:
+                    spec = self._spec_file("occupied", {"capex_eur": {"multipliers": [0.8]}})
+                    arguments = self._arguments(spec, output, *extra, "--force")
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(arguments), 0)
+                survivors = [
+                    path.read_text(encoding="utf-8") for path in output.rglob("user-notes.txt")
+                ]
+                self.assertEqual(survivors, ["keep me"])
 
 
 if __name__ == "__main__":  # pragma: no cover
