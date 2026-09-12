@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import stat
 import tempfile
@@ -1050,6 +1051,84 @@ class SensitivityScheduleRetentionTests(unittest.TestCase):
                     path.read_text(encoding="utf-8") for path in output.rglob("user-notes.txt")
                 ]
                 self.assertEqual(survivors, ["keep me"])
+
+    def _external_directory(self) -> Path:
+        # A directory outside the output, with a file in it and a read-only
+        # attribute of its own, so any change to it is visible afterwards.
+        external = self.work / "external"
+        external.mkdir()
+        (external / "keep.csv").write_text("outside", encoding="utf-8")
+        external.chmod(stat.S_IREAD | stat.S_IEXEC)
+        self.addCleanup(external.chmod, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
+        return external
+
+    def _assert_link_replaced_and_target_intact(
+        self, output: Path, external: Path, mode_before: int
+    ) -> None:
+        schedules = output / "schedules"
+        self.assertFalse(schedules.is_symlink() or schedules.is_junction())
+        self.assertEqual(
+            {path.name for path in schedules.iterdir()},
+            {Path(row["schedule_file"]).name for row in self._rows(output)},
+        )
+        # Removed as a link: nothing hidden is left beside the table.
+        self.assertEqual(
+            sorted(path.name for path in output.iterdir()),
+            ["schedules", "sensitivity.csv", "sensitivity.json"],
+        )
+        # And never entered: the directory it pointed to is exactly as it was.
+        self.assertEqual(sorted(path.name for path in external.iterdir()), ["keep.csv"])
+        self.assertEqual((external / "keep.csv").read_text(encoding="utf-8"), "outside")
+        self.assertEqual(external.stat().st_mode, mode_before)
+
+    @unittest.skipUnless(os.name == "nt", "directory junctions exist only on Windows")
+    def test_a_junction_named_schedules_is_removed_as_a_link_under_force(self) -> None:
+        import _winapi
+
+        external = self._external_directory()
+        mode_before = external.stat().st_mode
+        output = self.work / "sensitivity"
+        output.mkdir()
+        _winapi.CreateJunction(str(external), str(output / "schedules"))
+        self.assertTrue((output / "schedules").is_junction())
+        spec = self._spec_file("price", {"market_price_level": {"multipliers": [1.2]}})
+        self._sensitivity(spec, output, "--retain-schedules", "--force")
+        self._assert_link_replaced_and_target_intact(output, external, mode_before)
+
+    @unittest.skipIf(
+        os.name == "nt",
+        "symlinks need extra privileges on Windows; the junction test covers links there",
+    )
+    def test_a_symlink_named_schedules_is_removed_as_a_link_under_force(self) -> None:
+        external = self._external_directory()
+        mode_before = external.stat().st_mode
+        output = self.work / "sensitivity"
+        output.mkdir()
+        (output / "schedules").symlink_to(external, target_is_directory=True)
+        spec = self._spec_file("price", {"market_price_level": {"multipliers": [1.2]}})
+        self._sensitivity(spec, output, "--retain-schedules", "--force")
+        self._assert_link_replaced_and_target_intact(output, external, mode_before)
+
+    def test_a_hard_link_in_schedules_keeps_the_external_file_read_only(self) -> None:
+        output = self.work / "sensitivity"
+        first = self._spec_file("first", {"market_price_level": {"multipliers": [1.2]}})
+        second = self._spec_file("second", {"capex_eur": {"multipliers": [0.8]}})
+        self._sensitivity(first, output, "--retain-schedules")
+        external = self.work / "external.csv"
+        external.write_text("outside", encoding="utf-8")
+        os.link(external, output / "schedules" / "linked.csv")
+        external.chmod(stat.S_IREAD)
+        self.addCleanup(external.chmod, stat.S_IREAD | stat.S_IWRITE)
+        self._sensitivity(second, output, "--retain-schedules", "--force")
+        # A read-only attribute belongs to every name of the file, some outside
+        # this output, so it is not cleared to delete the name inside it.
+        self.assertFalse(external.stat().st_mode & stat.S_IWRITE)
+        self.assertEqual(external.read_text(encoding="utf-8"), "outside")
+        # The new schedules are published all the same.
+        self.assertEqual(
+            {path.name for path in (output / "schedules").iterdir()},
+            {Path(row["schedule_file"]).name for row in self._rows(output)},
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
