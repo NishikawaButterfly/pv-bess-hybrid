@@ -99,7 +99,9 @@ With `--retain-schedules`, the pair gains an optional third part: `schedules/`, 
 standalone `run` of that row writes at the same solver settings. Every row then gains a `schedule_file` field in the
 JSON and a last `schedule_file` column in the CSV, relative to the output directory. The
 three are published together or not at all when a write or a rename fails; like the run
-pair, they are not published crash-atomically. Reading one is covered in
+pair, they are not published crash-atomically. An existing `schedules/` is refused without
+`--force` and replaced whole with it; a run without `--retain-schedules` leaves it
+untouched, so any files there belong to an earlier table. Reading one is covered in
 [chapter 21](21-sensitivity.md#reading-a-retained-schedule).
 
 ## What you cannot export

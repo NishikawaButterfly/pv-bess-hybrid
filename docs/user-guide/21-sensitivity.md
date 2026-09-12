@@ -220,8 +220,8 @@ where the base battery gives 3,640 kW. Each ends 20:00 at the state of charge it
 end the day with, 10,000 kWh and 15,000 kWh. The larger battery also takes 312.5 kW less
 at 10:00. That is one more charging hour, one more discharging hour, 4.32 MWh more
 discharged, and EUR 284.66 more market value a day. The degradation reserve rises too,
-from EUR 90 to 135, all of it at 18:00 and 20:00, so the day's operating value, which is
-what the NPV is built on, rises by EUR 239.66.
+from EUR 90 to 135, and the whole EUR 45 increase falls at 18:00 and 20:00, so the day's
+operating value, which is what the NPV is built on, rises by EUR 239.66.
 
 **The table says it does not pay; the schedule says what it does.** At the declared
 250 EUR/kWh the extra 10 MWh add EUR 2,500,000 of CAPEX, and EUR 239.66 a day of operating
