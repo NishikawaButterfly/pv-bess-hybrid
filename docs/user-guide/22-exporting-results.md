@@ -100,8 +100,12 @@ standalone `run` of that row writes at the same solver settings. Every row then 
 JSON and a last `schedule_file` column in the CSV, relative to the output directory. The
 three are published together or not at all when a write or a rename fails; like the run
 pair, they are not published crash-atomically. An existing `schedules/` is refused without
-`--force` and replaced whole with it; a run without `--retain-schedules` leaves it
-untouched, so any files there belong to an earlier table. Reading one is covered in
+`--force` and replaced whole with it. One exception: a read-only file inside it that also
+has a hard link elsewhere is left alone, because its read-only attribute belongs to that
+other name too; the new output is published as usual, and the old directory, or what
+remains of it, stays beside it as a hidden `.schedules.*.backup.tmp`. A run without
+`--retain-schedules` leaves an existing `schedules/` untouched, so any files there belong
+to an earlier table. Reading one is covered in
 [chapter 21](21-sensitivity.md#reading-a-retained-schedule).
 
 ## What you cannot export
