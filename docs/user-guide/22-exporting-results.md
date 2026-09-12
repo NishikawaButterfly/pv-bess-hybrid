@@ -94,15 +94,16 @@ with `; ` in the CSV — the warning texts themselves contain semicolons, so do 
 that cell; read the JSON list when you need them individually. There is no `export-xlsx` equivalent
 for sensitivity results.
 
+With `--retain-schedules`, a third artifact joins the pair: `schedules/`, holding one
+`<analysis_input_sha256>.csv` per distinct run, each byte for byte the `dispatch.csv` a
+standalone `run` of that row writes. Every row then gains a `schedule_file` field in the
+JSON and a last `schedule_file` column in the CSV, relative to the output directory. The
+three are published together or not at all. Reading one is covered in
+[chapter 21](21-sensitivity.md#reading-a-retained-schedule).
+
 ## What you cannot export
 
 Worth knowing before you plan a deliverable around this tool.
-
-**No per-interval data in the sensitivity output.** A row carries its metrics and
-warnings, never the schedule behind them. The
-schedules that produced them are solved, used, and discarded — so you cannot see *why* a
-variant behaved differently, only that it did. Reproducing a variant's schedule means
-rebuilding it as a standalone scenario and running it again.
 
 **No workbook for sensitivity results.** `export-xlsx` handles run directories only.
 

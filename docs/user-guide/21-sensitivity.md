@@ -157,6 +157,77 @@ escalation, say — sits beside the table and on every row, since every row inhe
 base assumptions, and is printed once on stdout. A sweep never silences a warning the
 equivalent standalone run would have raised.
 
+## Reading a retained schedule
+
+A row says *that* a variant differs. Its schedule says *why*. Run the bundled spec again with
+`--retain-schedules`:
+
+```bash
+pv-bess sensitivity \
+  --scenario sample-data/scenario.json \
+  --spec sample-data/sensitivity-spec.json \
+  --output results/sensitivity \
+  --retain-schedules
+```
+
+The command prints one more line, `sensitivity_schedules:` followed by the directory, and
+`schedules/` holds eleven files, one per row. Each is the `dispatch.csv` that a standalone
+`run` of that row's scenario and assumptions would write, named by the row's analysis hash;
+every row names its own in `schedule_file`.
+
+Take the row whose NPV departs furthest from the base: `energy_capacity_kwh*1.5`, at
+EUR -5,647,639 against the base's -3,818,737. Its `schedule_file` is
+`schedules/200262c3f93a4bc21986f0055cc2f6b4c20c28b9d706a690f20a9011a3dbf88e.csv`. The base's is
+`schedules/c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8.csv`, named by the analysis hash every
+plain `run` of the sample reports. Twenty of the twenty-four hours carry the same flows in
+both files. These are the other four, from inside `results/sensitivity`:
+
+```text
+$ head -1 schedules/c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8.csv | cut -d, -f3,6,8,10,14
+timestamp,market_price_eur_per_mwh,pv_charge_kw,battery_export_kw,soc_end_kwh
+$ grep -E "T(10|14|18|20):00" schedules/c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8.csv | cut -d, -f3,6,8,10,14
+2026-06-15T10:00:00+00:00,45.0,1774.9999999999986,0.0,17464.0
+2026-06-15T14:00:00+00:00,45.0,0.0,0.0,19000.0
+2026-06-15T18:00:00+00:00,110.0,0.0,0.0,19000.0
+2026-06-15T20:00:00+00:00,125.0,0.0,3639.9999999999995,10000.0
+$ grep -E "T(10|14|18|20):00" schedules/200262c3f93a4bc21986f0055cc2f6b4c20c28b9d706a690f20a9011a3dbf88e.csv | cut -d, -f3,6,8,10,14
+2026-06-15T10:00:00+00:00,45.0,1462.4999999999977,0.0,22163.999999999996
+2026-06-15T14:00:00+00:00,45.0,5000.0,0.0,28499.999999999996
+2026-06-15T18:00:00+00:00,110.0,0.0,2959.9999999999964,25416.666666666668
+2026-06-15T20:00:00+00:00,125.0,0.0,5000.0,15000.0
+```
+
+The files keep full float precision, so `1774.9999999999986` is 1,775 kW. Across the day:
+
+| Over the day | base | `energy_capacity_kwh*1.5` |
+| --- | ---: | ---: |
+| PV charged | 9.375 MWh | 14.0625 MWh |
+| Battery discharged | 8.64 MWh | 12.96 MWh |
+| Hours charging / discharging | 8 / 2 | 9 / 3 |
+| Highest state of charge | 19,000 kWh | 28,500 kWh |
+| Market value | EUR 2,754.63 | EUR 3,039.29 |
+
+**Four hours carry the whole difference.** At 14:00 the base battery is already at
+19,000 kWh, its 95% ceiling, and charges nothing. The larger battery takes 5,000 kW at
+EUR 45 and ends the hour at its own ceiling of 28,500 kWh. It spends that energy in the
+evening: 2,960 kW at 18:00, when the base battery is idle, and the full 5,000 kW at 20:00,
+where the base battery gives 3,640 kW. Each ends 20:00 at the state of charge it must also
+end the day with, 10,000 kWh and 15,000 kWh. The larger battery also takes 312.5 kW less
+at 10:00. That is one more charging hour, one more discharging hour, 4.32 MWh more
+discharged, and EUR 284.66 more market value a day.
+
+**The table says it does not pay; the schedule says what it does.** At the declared
+250 EUR/kWh the extra 10 MWh add EUR 2,500,000 of CAPEX, and EUR 284.66 a day does not
+earn that back over the project life, hence the EUR 1,828,902 fall in NPV. The schedule
+shows where the gain comes from, and why it is small: both batteries already discharge
+the full 5,000 kW at 19:00, the day's highest price at EUR 140, so the extra capacity only
+reaches the hours either side of it, 18:00 at EUR 110 and 20:00 at EUR 125, with energy
+bought at EUR 45. The case for a larger battery turns on those shoulder prices, not on
+the peak.
+
+For a financial-only row the schedule is the base's dispatch under that row's analysis hash:
+compare its file with the base's and only the `analysis_input_sha256` column differs.
+
 ## What the layer is for, and what it is not
 
 It is a **one-at-a-time** design. Every run changes exactly one axis — a capacity variant

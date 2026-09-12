@@ -50,6 +50,26 @@ pv-bess sensitivity \
 
 This writes `sensitivity.json` and a flat `sensitivity.csv` with one row per run. Every run records its own dispatch-input and analysis-input SHA-256 using the same canonical serialization as `pv-bess run`, so any single variant can be reproduced and checked as a standalone run; the base row's hashes match a plain `run` of the same scenario byte for byte. Each row also reports the `capex_eur` it was evaluated under and the kernel's `warnings` for its own assumptions, so a scanned value that crosses a plausibility threshold is flagged on the row that crossed it. Existing output files are not overwritten unless you pass `--force`.
 
+## Retaining schedules
+
+Add `--retain-schedules` to keep the schedule behind every row:
+
+```bash
+pv-bess sensitivity \
+  --scenario sample-data/scenario.json \
+  --spec sample-data/sensitivity-spec.json \
+  --output results/sensitivity \
+  --retain-schedules
+```
+
+This also writes `schedules/`, one CSV per distinct run, and gives every row a `schedule_file` field in `sensitivity.json` and a last `schedule_file` column in `sensitivity.csv`: the file's path relative to the output directory, with forward slashes on every platform, such as `schedules/c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa354415e97cdab8.csv` for the base row. Each file is byte for byte the `dispatch.csv` that `pv-bess run` writes for that row's scenario and financial assumptions, both hash columns included, so any row can be checked against a standalone run.
+
+Files are named by the row's `analysis_input_sha256`, never by its label. That hash covers the scenario and the financial assumptions, which together decide every byte of the file, so two rows share a file exactly when they share the hash, and no two files are identical. A financial-only row shares the base dispatch, so its file differs from the base's only in the `analysis_input_sha256` column. Labels contain characters such as `*` that Windows does not allow in file names, and no label reaches a file name. Every row of the bundled spec has analysis inputs of its own, so it writes eleven files for eleven rows.
+
+The table and `schedules/` are published together or not at all. An existing `schedules/` is refused unless you pass `--force`, in the same words as the table files; with `--force` it is replaced whole, so no file from an earlier run survives. A run without `--retain-schedules` neither checks nor touches an existing `schedules/`: its rows carry no `schedule_file`, so any files left there belong to an earlier table. As for the table files, the overwrite check runs after the solves, not before them.
+
+Without the flag nothing changes: no `schedules/`, no `schedule_file`, and the same two files as before. Retaining schedules changes no number in either file.
+
 ## Worked example
 
 The bundled spec above against the bundled 24-hour sample produces eleven runs. Values are rounded here for reading; the artifacts hold full precision.
