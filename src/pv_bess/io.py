@@ -330,17 +330,30 @@ def _reserve_backup_path(path: Path) -> Path:
     return backup_path
 
 
-def _clear_read_only(function: Callable[..., object], path: str, _error: BaseException) -> None:
-    """Let :func:`shutil.rmtree` remove a read-only entry, which Windows otherwise refuses."""
+def _clear_read_only(function: Callable[..., object], path: str, error: BaseException) -> None:
+    """Let :func:`shutil.rmtree` remove a read-only entry, which Windows otherwise refuses.
 
+    An entry with more than one hard link is left alone and its error raised
+    again: the attribute belongs to every name of the file, some possibly
+    outside the tree, so clearing it would change a file this module does not
+    own. The tree then stays where it was moved, as a file target's backup
+    already does when it cannot be removed.
+    """
+
+    if os.lstat(path).st_nlink > 1:
+        raise error
     os.chmod(path, stat.S_IWRITE)
     function(path)
 
 
 def _remove_tree(path: Path) -> None:
-    """Remove a directory this module staged, published, or moved aside, or a file in its place."""
+    """Remove a directory this module staged, published, or moved aside, or a file in its place.
 
-    if path.is_dir() and not path.is_symlink():
+    A link, a symlink or a Windows junction alike, is removed as a link and
+    never followed, so nothing outside the output directory is touched.
+    """
+
+    if path.is_dir() and not path.is_symlink() and not path.is_junction():
         shutil.rmtree(path, onexc=_clear_read_only)
     else:
         path.unlink(missing_ok=True)
