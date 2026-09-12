@@ -52,6 +52,11 @@ def _parser() -> argparse.ArgumentParser:
     sensitivity.add_argument("--time-limit", type=float, default=60.0)
     sensitivity.add_argument("--mip-gap", type=float, default=1e-8)
     sensitivity.add_argument("--force", action="store_true")
+    sensitivity.add_argument(
+        "--retain-schedules",
+        action="store_true",
+        help="also write each distinct run's dispatch schedule under OUTPUT/schedules/",
+    )
 
     serve = subparsers.add_parser("serve", help="serve the optional dispatch API over HTTP")
     serve.add_argument("--host", default="127.0.0.1")
@@ -178,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 spec,
                 time_limit_seconds=args.time_limit,
                 relative_mip_gap=args.mip_gap,
+                retain_schedules=args.retain_schedules,
             )
             json_path, csv_path = write_sensitivity_results(args.output, result, force=args.force)
             _print_warnings(result.warnings)
@@ -189,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"warning: {run.label}: {warning}")
             print(f"sensitivity_json: {json_path}")
             print(f"sensitivity_csv: {csv_path}")
+            if result.schedules:
+                print(f"sensitivity_schedules: {json_path.parent / 'schedules'}")
             print(f"base_dispatch_input_sha256: {result.base.dispatch_input_sha256}")
             print(f"base_analysis_input_sha256: {result.base.analysis_input_sha256}")
             return 0
