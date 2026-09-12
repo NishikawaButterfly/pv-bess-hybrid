@@ -161,8 +161,8 @@ base_analysis_input_sha256: c8c1af3b4a7d5d2cbac5a49eb312c88ff09a2d54084bbecffa35
 
 Eleven runs — a base plus ten variants — in about two seconds on the reference machine.
 The base row's hashes match a plain `run` of the same scenario exactly, which is the check
-that the sensitivity layer is not a different calculation. Covered in
-[chapter 21](21-sensitivity.md).
+that the sensitivity layer is not a different calculation. Add `--retain-schedules` to also keep
+every row's schedule under `schedules/`. Covered in [chapter 21](21-sensitivity.md).
 
 ## Exit behaviour
 

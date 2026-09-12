@@ -1,6 +1,6 @@
 # 22. Exporting results
 
-Three artifacts exist: the run pair, the sensitivity pair, and an optional Excel workbook.
+Three artifacts exist: the run pair, the sensitivity pair with its optional schedules, and an optional Excel workbook.
 This chapter covers what each contains and what you cannot get out of the product.
 
 ## The run pair
@@ -94,15 +94,17 @@ with `; ` in the CSV — the warning texts themselves contain semicolons, so do 
 that cell; read the JSON list when you need them individually. There is no `export-xlsx` equivalent
 for sensitivity results.
 
+With `--retain-schedules`, the pair gains an optional third part: `schedules/`, holding one
+`<analysis_input_sha256>.csv` per distinct run, each byte for byte the `dispatch.csv` a
+standalone `run` of that row writes at the same solver settings. Every row then gains a `schedule_file` field in the
+JSON and a last `schedule_file` column in the CSV, relative to the output directory. The
+three are published together or not at all when a write or a rename fails; like the run
+pair, they are not published crash-atomically. Reading one is covered in
+[chapter 21](21-sensitivity.md#reading-a-retained-schedule).
+
 ## What you cannot export
 
 Worth knowing before you plan a deliverable around this tool.
-
-**No per-interval data in the sensitivity output.** A row carries its metrics and
-warnings, never the schedule behind them. The
-schedules that produced them are solved, used, and discarded — so you cannot see *why* a
-variant behaved differently, only that it did. Reproducing a variant's schedule means
-rebuilding it as a standalone scenario and running it again.
 
 **No workbook for sensitivity results.** `export-xlsx` handles run directories only.
 

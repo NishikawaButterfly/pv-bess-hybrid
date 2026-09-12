@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import stat
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
@@ -12,9 +14,9 @@ from typing import Any
 from unittest import mock
 
 from pv_bess.cli import main
-from pv_bess.dispatch import optimize_dispatch
+from pv_bess.dispatch import DispatchOptimizationError, optimize_dispatch
 from pv_bess.finance import evaluate_financials, financial_precondition_errors
-from pv_bess.io import load_sensitivity_spec
+from pv_bess.io import load_scenario, load_sensitivity_spec, write_results
 from pv_bess.models import BatteryConfig, FinancialAssumptions, GridConfig
 from pv_bess.sensitivity import (
     MAX_TOTAL_RUNS,
@@ -24,6 +26,7 @@ from pv_bess.sensitivity import (
     apply_variant,
     parse_sensitivity_spec,
     run_sensitivity,
+    variant_assumptions,
 )
 from tests.helpers import make_scenario
 
@@ -632,6 +635,421 @@ class SensitivityCommandLineTests(unittest.TestCase):
                         str(Path(directory) / "sensitivity"),
                     ]
                 )
+
+
+_DEFAULT_TABLE_COLUMNS = [
+    "label",
+    "parameter",
+    "mode",
+    "value",
+    "dispatch_input_sha256",
+    "analysis_input_sha256",
+    "market_value_eur",
+    "npv_eur",
+    "irr_fraction",
+    "simple_payback_years",
+    "discounted_payback_years",
+    "lcos_eur_per_mwh",
+    "capex_eur",
+    "warnings",
+]
+
+
+class SensitivityScheduleRetentionTests(unittest.TestCase):
+    """--retain-schedules keeps, for every row, the schedule its numbers came from."""
+
+    def setUp(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        self.scenario = root / "sample-data" / "scenario.json"
+        self.bundled_spec = root / "sample-data" / "sensitivity-spec.json"
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.work = Path(directory.name)
+
+    def _spec_file(self, name: str, parameters: dict[str, Any]) -> Path:
+        path = self.work / f"{name}.json"
+        path.write_text(
+            json.dumps({"schema_version": "1.0", "parameters": parameters}), encoding="utf-8"
+        )
+        return path
+
+    def _arguments(self, spec: Path, output: Path, *extra: str) -> list[str]:
+        return [
+            "sensitivity",
+            "--scenario",
+            str(self.scenario),
+            "--spec",
+            str(spec),
+            "--output",
+            str(output),
+            "--time-limit",
+            "10",
+            *extra,
+        ]
+
+    def _sensitivity(self, spec: Path, output: Path, *extra: str) -> str:
+        """Run the command and return its stdout; any exit fails the test instead."""
+
+        stdout = StringIO()
+        try:
+            with redirect_stdout(stdout), redirect_stderr(StringIO()):
+                status = main(self._arguments(spec, output, *extra))
+        except SystemExit as exc:
+            self.fail(f"pv-bess sensitivity exited: {exc}")
+        self.assertEqual(status, 0)
+        return stdout.getvalue()
+
+    @staticmethod
+    def _rows(output: Path) -> list[dict[str, Any]]:
+        table = json.loads((output / "sensitivity.json").read_text(encoding="utf-8"))
+        return [table["base"], *table["variants"]]
+
+    @staticmethod
+    def _csv_rows(path: Path) -> list[dict[str, str]]:
+        with path.open(encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    @staticmethod
+    def _snapshot(output: Path) -> dict[str, bytes | None]:
+        """Every entry under ``output``, hidden ones included; None marks a directory."""
+
+        return {
+            path.relative_to(output).as_posix(): None if path.is_dir() else path.read_bytes()
+            for path in sorted(output.rglob("*"))
+        }
+
+    def test_retained_schedule_matches_a_standalone_run_of_that_variant(self) -> None:
+        spec = self._spec_file(
+            "capacity", {"energy_capacity_kwh": {"multipliers": [1.5], "capex_eur_per_kwh": 250}}
+        )
+        output = self.work / "sensitivity"
+        self._sensitivity(spec, output, "--retain-schedules")
+        (row,) = [item for item in self._rows(output) if item["label"] == "energy_capacity_kwh*1.5"]
+
+        # The same variant written by hand as a scenario file: 20,000 kWh x 1.5,
+        # and 5,000,000 EUR plus 10,000 kWh at the declared 250 EUR/kWh.
+        standalone = self.work / "standalone"
+        standalone.mkdir()
+        payload = json.loads(self.scenario.read_text(encoding="utf-8"))
+        payload["battery"]["energy_capacity_kwh"] = 30_000
+        payload["financial"]["capex_eur"] = 7_500_000
+        (standalone / "scenario.json").write_text(json.dumps(payload), encoding="utf-8")
+        (standalone / "hourly.csv").write_bytes(self.scenario.with_name("hourly.csv").read_bytes())
+        with redirect_stdout(StringIO()):
+            status = main(
+                [
+                    "run",
+                    "--scenario",
+                    str(standalone / "scenario.json"),
+                    "--output",
+                    str(standalone / "run"),
+                    "--time-limit",
+                    "10",
+                ]
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            (output / row["schedule_file"]).read_bytes(),
+            (standalone / "run" / "dispatch.csv").read_bytes(),
+        )
+
+    def test_every_schedule_is_the_run_its_row_describes(self) -> None:
+        spec_path = self._spec_file(
+            "mixed",
+            {
+                "market_price_level": {"multipliers": [1.2]},
+                "energy_capacity_kwh": {"multipliers": [1.5], "capex_eur_per_kwh": 250},
+                "capex_eur": {"multipliers": [0.8]},
+                "discount_rate_fraction": {"values": [0.1]},
+            },
+        )
+        output = self.work / "sensitivity"
+        self._sensitivity(spec_path, output, "--retain-schedules")
+        rows = {row["label"]: row for row in self._rows(output)}
+
+        scenario, assumptions = load_scenario(self.scenario)
+        runs = [("base", scenario, assumptions)]
+        runs.extend(
+            (
+                variant.label,
+                apply_variant(scenario, variant),
+                variant_assumptions(scenario, assumptions, variant),
+            )
+            for variant in load_sensitivity_spec(spec_path).variants
+        )
+        self.assertEqual(sorted(label for label, _, _ in runs), sorted(rows))
+        for index, (label, run_scenario, run_assumptions) in enumerate(runs):
+            with self.subTest(row=label):
+                dispatch = optimize_dispatch(run_scenario)
+                financial = evaluate_financials(dispatch, run_scenario, run_assumptions)
+                # What `pv-bess run` writes for this scenario and these assumptions.
+                run_output = self.work / "standalone" / str(index)
+                write_results(run_output, dispatch, financial)
+                self.assertEqual(
+                    (output / rows[label]["schedule_file"]).read_bytes(),
+                    (run_output / "dispatch.csv").read_bytes(),
+                )
+
+    def test_financial_only_variants_keep_their_own_file_over_the_base_dispatch(self) -> None:
+        spec = self._spec_file(
+            "financial",
+            {"capex_eur": {"multipliers": [0.8]}, "discount_rate_fraction": {"values": [0.1]}},
+        )
+        output = self.work / "sensitivity"
+        self._sensitivity(spec, output, "--retain-schedules")
+        base, *variants = self._rows(output)
+        base_schedule = self._csv_rows(output / base["schedule_file"])
+        self.assertEqual(len(variants), 2)
+        for row in variants:
+            with self.subTest(row=row["label"]):
+                self.assertEqual(row["dispatch_input_sha256"], base["dispatch_input_sha256"])
+                self.assertNotEqual(row["schedule_file"], base["schedule_file"])
+                schedule = self._csv_rows(output / row["schedule_file"])
+                self.assertEqual(len(schedule), len(base_schedule))
+                for own, shared in zip(schedule, base_schedule, strict=True):
+                    self.assertEqual(own["dispatch_input_sha256"], base["dispatch_input_sha256"])
+                    self.assertEqual(own["analysis_input_sha256"], row["analysis_input_sha256"])
+                    self.assertNotEqual(own["analysis_input_sha256"], base["analysis_input_sha256"])
+                    own_rest = {k: v for k, v in own.items() if k != "analysis_input_sha256"}
+                    shared_rest = {k: v for k, v in shared.items() if k != "analysis_input_sha256"}
+                    self.assertEqual(own_rest, shared_rest)
+
+    def test_rows_with_the_same_analysis_hash_share_one_file(self) -> None:
+        spec = self._spec_file("repeat", {"capex_eur": {"multipliers": [1, 1.2]}})
+        output = self.work / "sensitivity"
+        self._sensitivity(spec, output, "--retain-schedules")
+        rows = {row["label"]: row for row in self._rows(output)}
+        base, same, other = rows["base"], rows["capex_eur*1"], rows["capex_eur*1.2"]
+        self.assertEqual(same["analysis_input_sha256"], base["analysis_input_sha256"])
+        self.assertEqual(same["schedule_file"], base["schedule_file"])
+        self.assertNotEqual(other["schedule_file"], base["schedule_file"])
+        files = sorted((output / "schedules").iterdir())
+        self.assertEqual(len(files), 2)
+        # No two files carry the same bytes: one file per distinct run.
+        self.assertEqual(len({path.read_bytes() for path in files}), len(files))
+
+    def test_every_row_schedule_file_exists_and_is_relative(self) -> None:
+        output = self.work / "sensitivity"
+        self._sensitivity(self.bundled_spec, output, "--retain-schedules")
+        rows = self._rows(output)
+        flat_rows = self._csv_rows(output / "sensitivity.csv")
+        self.assertEqual(len(flat_rows), len(rows))
+        for row, flat in zip(rows, flat_rows, strict=True):
+            with self.subTest(row=row["label"]):
+                relative = row["schedule_file"]
+                self.assertEqual(relative, f"schedules/{row['analysis_input_sha256']}.csv")
+                self.assertFalse(Path(relative).is_absolute())
+                self.assertTrue((output / relative).is_file())
+                self.assertEqual(flat["label"], row["label"])
+                self.assertEqual(flat["schedule_file"], relative)
+        with (output / "sensitivity.csv").open(encoding="utf-8", newline="") as handle:
+            header = next(csv.reader(handle))
+        self.assertEqual(header, [*_DEFAULT_TABLE_COLUMNS, "schedule_file"])
+
+    def test_schedule_filenames_are_bare_analysis_hashes(self) -> None:
+        output = self.work / "sensitivity"
+        self._sensitivity(self.bundled_spec, output, "--retain-schedules")
+        names = sorted(path.name for path in (output / "schedules").iterdir())
+        # 64 lowercase hexadecimal characters and ".csv": nothing from a label,
+        # so no "*" (forbidden on Windows), "=", or path separator can appear.
+        for name in names:
+            self.assertRegex(name, r"\A[0-9a-f]{64}\.csv\Z")
+        self.assertEqual(
+            {name.removesuffix(".csv") for name in names},
+            {row["analysis_input_sha256"] for row in self._rows(output)},
+        )
+
+    def test_default_output_is_unchanged_without_the_flag(self) -> None:
+        spec = self._spec_file(
+            "mixed",
+            {"market_price_level": {"multipliers": [1.2]}, "capex_eur": {"multipliers": [0.8]}},
+        )
+        plain, retained = self.work / "plain", self.work / "retained"
+        stdout = self._sensitivity(spec, plain)
+        self._sensitivity(spec, retained, "--retain-schedules")
+
+        self.assertFalse((plain / "schedules").exists())
+        self.assertNotIn("schedules", stdout)
+        plain_table = json.loads((plain / "sensitivity.json").read_text(encoding="utf-8"))
+        retained_table = json.loads((retained / "sensitivity.json").read_text(encoding="utf-8"))
+        for row in (plain_table["base"], *plain_table["variants"]):
+            self.assertNotIn("schedule_file", row)
+        for row in (retained_table["base"], *retained_table["variants"]):
+            del row["schedule_file"]
+        del plain_table["generated_at_utc"], retained_table["generated_at_utc"]
+        # Retaining schedules adds a field and changes no number.
+        self.assertEqual(retained_table, plain_table)
+
+        plain_lines = (plain / "sensitivity.csv").read_text(encoding="utf-8").splitlines()
+        retained_lines = (retained / "sensitivity.csv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(plain_lines[0].split(","), _DEFAULT_TABLE_COLUMNS)
+        self.assertEqual([line.rsplit(",", 1)[0] for line in retained_lines], plain_lines)
+
+    def test_existing_schedules_directory_is_refused_without_force(self) -> None:
+        output = self.work / "sensitivity"
+        (output / "schedules").mkdir(parents=True)
+        (output / "schedules" / "keep.txt").write_text("prior", encoding="utf-8")
+        spec = self._spec_file("price", {"market_price_level": {"multipliers": [1.2]}})
+        with (
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()),
+            self.assertRaisesRegex(
+                SystemExit, r"refusing to overwrite schedules/; pass --force to replace them"
+            ),
+        ):
+            main(self._arguments(spec, output, "--retain-schedules"))
+        self.assertEqual((output / "schedules" / "keep.txt").read_text(encoding="utf-8"), "prior")
+        self.assertEqual(sorted(path.name for path in output.iterdir()), ["schedules"])
+
+    def test_a_failure_while_writing_schedules_publishes_nothing(self) -> None:
+        import pv_bess.io as io_module
+
+        original = io_module._write_new_text
+        schedules_written: list[str] = []
+
+        def failing(path: Path, content: str) -> None:
+            if re.fullmatch(r"[0-9a-f]{64}\.csv", path.name):
+                schedules_written.append(path.name)
+                if len(schedules_written) == 2:
+                    raise OSError("simulated failure while writing a schedule")
+            original(path, content)
+
+        spec = self._spec_file("price", {"market_price_level": {"multipliers": [0.8, 1.2]}})
+        output = self.work / "sensitivity"
+        try:
+            with (
+                mock.patch("pv_bess.io._write_new_text", side_effect=failing),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+                self.assertRaisesRegex(OSError, "simulated failure while writing a schedule"),
+            ):
+                main(self._arguments(spec, output, "--retain-schedules"))
+        except SystemExit as exc:
+            self.fail(f"pv-bess sensitivity exited: {exc}")
+        self.assertEqual(len(schedules_written), 2)
+        # Not the table, not a partial schedules/, not even an empty one.
+        self.assertEqual(sorted(output.iterdir()) if output.exists() else [], [])
+
+    def test_a_failure_mid_publication_with_force_leaves_the_previous_state_intact(
+        self,
+    ) -> None:
+        output = self.work / "sensitivity"
+        first = self._spec_file("first", {"market_price_level": {"multipliers": [1.2]}})
+        second = self._spec_file(
+            "second",
+            {"market_price_level": {"multipliers": [0.8]}, "capex_eur": {"multipliers": [0.8]}},
+        )
+        self._sensitivity(first, output, "--retain-schedules")
+        before = self._snapshot(output)
+        self.assertIn("schedules", before)
+
+        original_replace = Path.replace
+        interrupted: list[Path] = []
+
+        def replace_once_into_schedules(source: Path, target: Path) -> Path:
+            # The new schedules/ is the last thing swapped in; fail exactly there,
+            # after the new table has already taken the old table's place.
+            if Path(target).name == "schedules" and not interrupted:
+                interrupted.append(source)
+                raise OSError("simulated failure while publishing schedules")
+            return original_replace(source, target)
+
+        try:
+            with (
+                mock.patch.object(
+                    Path, "replace", autospec=True, side_effect=replace_once_into_schedules
+                ),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+                self.assertRaisesRegex(OSError, "simulated failure while publishing schedules"),
+            ):
+                main(self._arguments(second, output, "--retain-schedules", "--force"))
+        except SystemExit as exc:
+            self.fail(f"pv-bess sensitivity exited: {exc}")
+        self.assertEqual(len(interrupted), 1)
+        self.assertEqual(self._snapshot(output), before)
+
+    def test_a_forced_run_without_the_flag_leaves_an_existing_schedules_directory_alone(
+        self,
+    ) -> None:
+        output = self.work / "sensitivity"
+        first = self._spec_file("first", {"market_price_level": {"multipliers": [1.2]}})
+        second = self._spec_file("second", {"capex_eur": {"multipliers": [0.8]}})
+        self._sensitivity(first, output, "--retain-schedules")
+        schedules_before = {
+            path.name: path.read_bytes() for path in (output / "schedules").iterdir()
+        }
+        self._sensitivity(second, output, "--force")
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in (output / "schedules").iterdir()},
+            schedules_before,
+        )
+        for row in self._rows(output):
+            self.assertNotIn("schedule_file", row)
+
+    def test_runs_that_share_an_analysis_hash_must_share_a_schedule(self) -> None:
+        scenario, assumptions = load_scenario(self.scenario)
+        # The bundled reserve is already 10 EUR/MWh, so this variant repeats the
+        # base inputs exactly, is solved again, and must reproduce the base schedule.
+        spec = _spec({"degradation_cost_eur_per_mwh_dc_discharged": {"values": [10]}})
+        base = optimize_dispatch(scenario)
+        first = base.intervals[0]
+        diverging = replace(
+            base,
+            intervals=(replace(first, pv_export_kw=first.pv_export_kw + 1), *base.intervals[1:]),
+        )
+        with (
+            mock.patch("pv_bess.sensitivity.optimize_dispatch", side_effect=[base, diverging]),
+            self.assertRaisesRegex(
+                DispatchOptimizationError, "same analysis inputs as 'base' but the solver"
+            ),
+        ):
+            run_sensitivity(scenario, assumptions, spec, retain_schedules=True)
+
+    def test_a_forced_replacement_removes_read_only_files_of_the_old_schedules(self) -> None:
+        output = self.work / "sensitivity"
+        first = self._spec_file("first", {"market_price_level": {"multipliers": [1.2]}})
+        second = self._spec_file("second", {"capex_eur": {"multipliers": [0.8]}})
+        self._sensitivity(first, output, "--retain-schedules")
+        for schedule in (output / "schedules").iterdir():
+            schedule.chmod(stat.S_IREAD)
+        self._sensitivity(second, output, "--retain-schedules", "--force")
+        # Replaced whole: exactly the new files, and no hidden backup left behind.
+        expected = {Path(row["schedule_file"]).name for row in self._rows(output)}
+        self.assertEqual({path.name for path in (output / "schedules").iterdir()}, expected)
+        self.assertEqual(
+            sorted(path.name for path in output.iterdir()),
+            ["schedules", "sensitivity.csv", "sensitivity.json"],
+        )
+
+    def test_a_forced_publish_never_deletes_what_occupies_a_table_file_name(self) -> None:
+        # Whatever sits where a table file goes is moved aside, as it always was:
+        # only schedules/ itself is ever removed recursively.
+        for name, extra in (("sensitivity.json", ("--retain-schedules",)), ("dispatch.csv", ())):
+            with self.subTest(target=name):
+                output = self.work / f"occupied-{len(extra)}"
+                (output / name).mkdir(parents=True)
+                (output / name / "user-notes.txt").write_text("keep me", encoding="utf-8")
+                if name == "dispatch.csv":
+                    arguments = [
+                        "run",
+                        "--scenario",
+                        str(self.scenario),
+                        "--output",
+                        str(output),
+                        "--time-limit",
+                        "10",
+                        "--force",
+                    ]
+                else:
+                    spec = self._spec_file("occupied", {"capex_eur": {"multipliers": [0.8]}})
+                    arguments = self._arguments(spec, output, *extra, "--force")
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(arguments), 0)
+                survivors = [
+                    path.read_text(encoding="utf-8") for path in output.rglob("user-notes.txt")
+                ]
+                self.assertEqual(survivors, ["keep me"])
 
 
 if __name__ == "__main__":  # pragma: no cover

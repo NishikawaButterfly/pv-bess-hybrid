@@ -143,6 +143,22 @@ class SensitivityRun:
 
 
 @dataclass(frozen=True, slots=True)
+class RetainedSchedule:
+    """The dispatch behind one distinct run, kept so its schedule can be published.
+
+    Keyed by the analysis hash, which covers the scenario and the financial
+    assumptions. Under one solver configuration (every run of a sensitivity
+    uses the same time limit and MIP gap) those decide every byte of the
+    dispatch.csv ``pv-bess run`` writes for them. A financial-only variant
+    shares the base dispatch but not its analysis hash, so it keeps a schedule
+    of its own.
+    """
+
+    analysis_input_sha256: str
+    dispatch: DispatchResult
+
+
+@dataclass(frozen=True, slots=True)
 class SensitivityResult:
     """Base-case metrics plus one run per variant, with shared solver metadata."""
 
@@ -161,6 +177,9 @@ class SensitivityResult:
     # input is not repeated on every row; a variant whose own assumptions
     # cross a threshold carries that warning on its run instead.
     warnings: tuple[str, ...] = ()
+    # One entry per distinct analysis hash, base first, and only when the
+    # caller asked for schedules; empty otherwise.
+    schedules: tuple[RetainedSchedule, ...] = ()
 
 
 def _number_list(entry: dict[str, Any], parameter: str, key: str) -> tuple[float, ...]:
@@ -371,8 +390,37 @@ def run_sensitivity(
     *,
     time_limit_seconds: float = 60.0,
     relative_mip_gap: float = 1e-8,
+    retain_schedules: bool = False,
 ) -> SensitivityResult:
-    """Solve the base case and every one-at-a-time variant with the unchanged kernel."""
+    """Solve the base case and every one-at-a-time variant with the unchanged kernel.
+
+    With ``retain_schedules`` the result also keeps the dispatch behind each
+    distinct analysis hash, so every row's schedule can be published beside
+    the table. Retaining changes no number: the rows are computed exactly as
+    without it.
+    """
+
+    retained: dict[str, RetainedSchedule] = {}
+    first_label: dict[str, str] = {}
+
+    def retain(label: str, dispatch: DispatchResult, financial: FinancialResult) -> None:
+        if not retain_schedules:
+            return
+        key = financial.analysis_input_sha256
+        kept = retained.get(key)
+        if kept is None:
+            retained[key] = RetainedSchedule(analysis_input_sha256=key, dispatch=dispatch)
+            first_label[key] = label
+        elif kept.dispatch.intervals != dispatch.intervals:
+            # Identical inputs share one schedule file. If the solver answered
+            # them differently, no single file is true for both rows. Only a
+            # physical row repeating earlier inputs can reach this: financial-only
+            # rows reuse the base dispatch object and are never re-solved.
+            raise DispatchOptimizationError(
+                f"variant {label!r} has the same analysis inputs as {first_label[key]!r} but "
+                "the solver returned a different schedule, so no single schedule can be "
+                "retained for both"
+            )
 
     # Every row ends in a financial evaluation, so an input-only financial
     # refusal is raised before the base solve instead of after it.
@@ -401,6 +449,7 @@ def run_sensitivity(
     )
     base_financial = evaluate_financials(base_dispatch, scenario, assumptions)
     base_run = _run_metrics("base", None, base_dispatch, base_financial, assumptions)
+    retain("base", base_dispatch, base_financial)
 
     variant_runs: list[SensitivityRun] = []
     for variant, variant_scenario, variant_assumption_set in variant_inputs:
@@ -422,6 +471,7 @@ def run_sensitivity(
         variant_runs.append(
             _run_metrics(variant.label, variant, dispatch, financial, variant_assumption_set)
         )
+        retain(variant.label, dispatch, financial)
 
     return SensitivityResult(
         scenario_name=scenario.name,
@@ -436,4 +486,5 @@ def run_sensitivity(
         base=base_run,
         variants=tuple(variant_runs),
         warnings=base_financial.warnings,
+        schedules=tuple(retained.values()),
     )

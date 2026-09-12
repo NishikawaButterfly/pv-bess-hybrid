@@ -5,7 +5,10 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
+import stat
 import tempfile
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -25,6 +28,7 @@ from pv_bess.models import (
 )
 from pv_bess.sensitivity import (
     SensitivityResult,
+    SensitivityRun,
     SensitivitySpec,
     SensitivitySpecError,
     parse_sensitivity_spec,
@@ -35,6 +39,7 @@ _MAX_SENSITIVITY_SPEC_BYTES = 100_000
 _MAX_TIME_SERIES_BYTES = 25_000_000
 _MAX_INTERVALS = 100_000
 _CSV_COLUMNS = ("timestamp", "pv_power_kw", "market_price_eur_per_mwh")
+_SCHEDULES_DIRECTORY = "schedules"
 _ROOT_KEYS = {
     "schema_version",
     "name",
@@ -325,34 +330,108 @@ def _reserve_backup_path(path: Path) -> Path:
     return backup_path
 
 
-def _publish_text_pair(artifacts: tuple[tuple[Path, str], ...]) -> None:
-    """Stage all artifacts, publish them together, and restore the prior pair on failure."""
+def _clear_read_only(function: Callable[..., object], path: str, _error: BaseException) -> None:
+    """Let :func:`shutil.rmtree` remove a read-only entry, which Windows otherwise refuses."""
+
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove a directory this module staged, published, or moved aside, or a file in its place."""
+
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, onexc=_clear_read_only)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _write_new_text(path: Path, content: str) -> None:
+    """Create ``path`` and write ``content`` durably, as :func:`_stage_text` does."""
+
+    with path.open("x", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _stage_directory(target: Path, files: Iterable[tuple[str, str]]) -> Path:
+    """Write every file into a fresh hidden directory beside ``target``.
+
+    The directory is private to this publication, so each file is created under
+    its final name, keeping staged paths as short as possible; files are taken
+    one at a time, so a caller can render each only when it is written.
+    """
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staged = Path(
+        tempfile.mkdtemp(dir=target.parent, prefix=f".{target.name}.", suffix=".stage.tmp")
+    )
+    try:
+        for name, content in files:
+            _write_new_text(staged / name, content)
+    except Exception:
+        with suppress(OSError):
+            _remove_tree(staged)
+        raise
+    return staged
+
+
+def _publish_text_pair(
+    artifacts: tuple[tuple[Path, str], ...],
+    directories: tuple[tuple[Path, Iterable[tuple[str, str]]], ...] = (),
+) -> None:
+    """Stage all artifacts, publish them together, and restore the prior set on failure.
+
+    ``directories`` are published whole and after the files: each is written
+    into a hidden staging directory and swapped into place, so a directory
+    appears complete or not at all, and one it replaces is removed with it.
+    Only those directories are ever removed recursively; every file target is
+    handled exactly as it always was, so whatever occupies a file target's
+    name is moved aside, never deleted recursively.
+    """
 
     staged: dict[Path, Path] = {}
     backups: dict[Path, Path] = {}
     published: set[Path] = set()
+    trees = {target for target, _ in directories}
+    targets = (*(target for target, _ in artifacts), *(target for target, _ in directories))
+
+    def discard(target: Path, path: Path) -> None:
+        if target in trees:
+            _remove_tree(path)
+        else:
+            path.unlink(missing_ok=True)
+
     try:
         for target, content in artifacts:
             staged[target] = _stage_text(target, content)
+        for target, files in directories:
+            staged[target] = _stage_directory(target, files)
 
-        for target, _ in artifacts:
-            if target.exists():
+        for target in targets:
+            # A directory target may be a link; lexists sees a dangling one.
+            if os.path.lexists(target) if target in trees else target.exists():
                 backup = _reserve_backup_path(target)
                 target.replace(backup)
                 backups[target] = backup
 
-        for target, _ in artifacts:
+        for target in targets:
             staged[target].replace(target)
             published.add(target)
     except Exception as publication_error:
         rollback_errors: list[OSError] = []
         for target in published.difference(backups):
             try:
-                target.unlink(missing_ok=True)
+                discard(target, target)
             except OSError as exc:
                 rollback_errors.append(exc)
         for target, backup in reversed(tuple(backups.items())):
             try:
+                # A file backup overwrites its published successor in one step;
+                # a directory cannot be replaced onto, so its successor goes first.
+                if target in published and target in trees:
+                    _remove_tree(target)
                 backup.replace(target)
             except OSError as exc:
                 rollback_errors.append(exc)
@@ -363,13 +442,68 @@ def _publish_text_pair(artifacts: tuple[tuple[Path, str], ...]) -> None:
             ) from publication_error
         raise
     else:
-        for backup in backups.values():
+        for target, backup in backups.items():
             with suppress(OSError):
-                backup.unlink(missing_ok=True)
+                discard(target, backup)
     finally:
-        for temporary_path in staged.values():
+        for target, temporary_path in staged.items():
             with suppress(OSError):
-                temporary_path.unlink(missing_ok=True)
+                discard(target, temporary_path)
+
+
+def _render_dispatch_csv(dispatch: DispatchResult, analysis_input_sha256: str) -> str:
+    """The dispatch.csv of one run: every interval, carrying both input hashes.
+
+    ``pv-bess run`` and the schedules a sensitivity run retains both come
+    from here, so a retained schedule is the file a standalone run writes.
+    """
+
+    fieldnames = [
+        "dispatch_input_sha256",
+        "analysis_input_sha256",
+        "timestamp",
+        "interval_hours",
+        "pv_power_kw",
+        "market_price_eur_per_mwh",
+        "pv_export_kw",
+        "pv_charge_kw",
+        "grid_charge_kw",
+        "battery_export_kw",
+        "grid_export_kw",
+        "curtailed_pv_kw",
+        "soc_start_kwh",
+        "soc_end_kwh",
+        "market_value_eur",
+        "degradation_cost_eur",
+        "net_operating_value_eur",
+    ]
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", newline="") as buffer:
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for item in dispatch.intervals:
+            writer.writerow(
+                {
+                    "dispatch_input_sha256": dispatch.input_sha256,
+                    "analysis_input_sha256": analysis_input_sha256,
+                    "timestamp": item.timestamp.isoformat(),
+                    "interval_hours": item.interval_hours,
+                    "pv_power_kw": item.pv_power_kw,
+                    "market_price_eur_per_mwh": item.market_price_eur_per_mwh,
+                    "pv_export_kw": item.pv_export_kw,
+                    "pv_charge_kw": item.pv_charge_kw,
+                    "grid_charge_kw": item.grid_charge_kw,
+                    "battery_export_kw": item.battery_export_kw,
+                    "grid_export_kw": item.grid_export_kw,
+                    "curtailed_pv_kw": item.curtailed_pv_kw,
+                    "soc_start_kwh": item.soc_start_kwh,
+                    "soc_end_kwh": item.soc_end_kwh,
+                    "market_value_eur": item.market_value_eur,
+                    "degradation_cost_eur": item.degradation_cost_eur,
+                    "net_operating_value_eur": item.net_operating_value_eur,
+                }
+            )
+        buffer.seek(0)
+        return buffer.read()
 
 
 def write_results(
@@ -431,53 +565,7 @@ def write_results(
         ],
     }
     summary_content = json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + "\n"
-
-    fieldnames = [
-        "dispatch_input_sha256",
-        "analysis_input_sha256",
-        "timestamp",
-        "interval_hours",
-        "pv_power_kw",
-        "market_price_eur_per_mwh",
-        "pv_export_kw",
-        "pv_charge_kw",
-        "grid_charge_kw",
-        "battery_export_kw",
-        "grid_export_kw",
-        "curtailed_pv_kw",
-        "soc_start_kwh",
-        "soc_end_kwh",
-        "market_value_eur",
-        "degradation_cost_eur",
-        "net_operating_value_eur",
-    ]
-    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", newline="") as buffer:
-        writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
-        writer.writeheader()
-        for item in dispatch.intervals:
-            writer.writerow(
-                {
-                    "dispatch_input_sha256": dispatch.input_sha256,
-                    "analysis_input_sha256": financial.analysis_input_sha256,
-                    "timestamp": item.timestamp.isoformat(),
-                    "interval_hours": item.interval_hours,
-                    "pv_power_kw": item.pv_power_kw,
-                    "market_price_eur_per_mwh": item.market_price_eur_per_mwh,
-                    "pv_export_kw": item.pv_export_kw,
-                    "pv_charge_kw": item.pv_charge_kw,
-                    "grid_charge_kw": item.grid_charge_kw,
-                    "battery_export_kw": item.battery_export_kw,
-                    "grid_export_kw": item.grid_export_kw,
-                    "curtailed_pv_kw": item.curtailed_pv_kw,
-                    "soc_start_kwh": item.soc_start_kwh,
-                    "soc_end_kwh": item.soc_end_kwh,
-                    "market_value_eur": item.market_value_eur,
-                    "degradation_cost_eur": item.degradation_cost_eur,
-                    "net_operating_value_eur": item.net_operating_value_eur,
-                }
-            )
-        buffer.seek(0)
-        dispatch_content = buffer.read()
+    dispatch_content = _render_dispatch_csv(dispatch, financial.analysis_input_sha256)
     _publish_text_pair(
         (
             (summary_path, summary_content),
@@ -493,15 +581,42 @@ def write_sensitivity_results(
     *,
     force: bool = False,
 ) -> tuple[Path, Path]:
-    """Publish a failure-safe sensitivity table pair, refusing silent overwrite."""
+    """Publish a failure-safe sensitivity table pair, refusing silent overwrite.
+
+    When the result retained schedules, ``schedules/`` is published with the
+    pair, all or nothing: one ``<analysis_input_sha256>.csv`` per distinct run,
+    each named on every row that it belongs to. A table written without
+    retained schedules neither checks nor touches an existing ``schedules/``.
+    """
 
     output = Path(output_directory).resolve()
     json_path = output / "sensitivity.json"
     csv_path = output / "sensitivity.csv"
+    schedules_path = output / _SCHEDULES_DIRECTORY
     existing_targets = [path for path in (json_path, csv_path) if path.exists()]
+    # lexists, not exists: a dangling link named schedules still occupies the name.
+    if result.schedules and os.path.lexists(schedules_path):
+        existing_targets.append(schedules_path)
     if existing_targets and not force:
-        names = ", ".join(path.name for path in existing_targets)
+        names = ", ".join(
+            f"{path.name}/" if path == schedules_path else path.name for path in existing_targets
+        )
         raise FileExistsError(f"refusing to overwrite {names}; pass --force to replace them")
+
+    # Relative to the output directory, with "/" on every platform, so the
+    # table reads the same wherever it is opened.
+    schedule_files = {
+        schedule.analysis_input_sha256: (
+            f"{_SCHEDULES_DIRECTORY}/{schedule.analysis_input_sha256}.csv"
+        )
+        for schedule in result.schedules
+    }
+
+    def table_row(run: SensitivityRun) -> dict[str, Any]:
+        row = asdict(run)
+        if schedule_files:
+            row["schedule_file"] = schedule_files[run.analysis_input_sha256]
+        return row
 
     output.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -527,8 +642,8 @@ def write_sensitivity_results(
             "lcos": "EUR/MWh",
         },
         "run_count": 1 + len(result.variants),
-        "base": asdict(result.base),
-        "variants": [asdict(item) for item in result.variants],
+        "base": table_row(result.base),
+        "variants": [table_row(item) for item in result.variants],
         # The table-level warnings are the base case's; a row whose own
         # assumptions cross a threshold carries that warning on the row.
         "warnings": list(result.warnings),
@@ -555,20 +670,31 @@ def write_sensitivity_results(
         "capex_eur",
         "warnings",
     ]
+    if schedule_files:
+        fieldnames.append("schedule_file")
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", newline="") as buffer:
         writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for run in (result.base, *result.variants):
-            row = asdict(run)
+            row = table_row(run)
             # The CSV is flat; the JSON keeps the warnings as a list.
             row["warnings"] = "; ".join(run.warnings)
             writer.writerow(row)
         buffer.seek(0)
         csv_content = buffer.read()
+    # Rendered one at a time as each file is written, never all at once.
+    schedules = (
+        (
+            f"{schedule.analysis_input_sha256}.csv",
+            _render_dispatch_csv(schedule.dispatch, schedule.analysis_input_sha256),
+        )
+        for schedule in result.schedules
+    )
     _publish_text_pair(
         (
             (json_path, json_content),
             (csv_path, csv_content),
-        )
+        ),
+        ((schedules_path, schedules),) if result.schedules else (),
     )
     return json_path, csv_path
