@@ -6,7 +6,7 @@ This repository is an engineering alpha. Security fixes are applied to the lates
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability or exposed secret. Email [nishikawa.butterfly@gmail.com](mailto:nishikawa.butterfly@gmail.com) with:
+Do not open a public issue for a suspected vulnerability or exposed secret. Report it privately through GitHub: open this repository's **Security** tab, choose **Report a vulnerability**, and include:
 
 - affected commit and file;
 - reproduction steps;
