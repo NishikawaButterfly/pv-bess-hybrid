@@ -22,6 +22,10 @@ All notable changes are documented here. The format follows Keep a Changelog and
 
 - an `energy_capacity_kwh` sensitivity entry now requires `capex_eur_per_kwh`, the marginal cost of capacity: each variant's CAPEX is derived as the base CAPEX plus the capacity delta times the declared cost, and reported on its row. A capacity entry without the declaration — previously accepted, with every size inheriting the base CAPEX — is refused with a message naming the field, because a sweep that prices a bigger battery the same as a smaller one biases every sizing conclusion toward the larger battery. The bundled `sample-data/sensitivity-spec.json` declares `250` (the linear cost implied by its own base pair) and also scans both new financial axes.
 
+### Fixed
+
+- the test suite on a kernel-only install, without the optional API stack: the web page tests now skip there like the other API tests, instead of erroring on an undefined `TestClient`. The Windows CI job, the only one that installs the kernel alone, had been reporting success over that error, because PowerShell took the step's exit code from its last command only; every CI step now runs under bash with `-e` and `-o pipefail`, so any failing command fails its job. Nothing under `src/` changes.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added

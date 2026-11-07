@@ -18,6 +18,10 @@ def _api_test_stack_available() -> bool:
 
 _API_STACK_AVAILABLE = _api_test_stack_available()
 
+# The API stack is optional, and the Windows smoke job runs this suite on the kernel alone.
+# TestClient and create_app exist only when the stack is installed, and pv_bess.api imports
+# FastAPI, so every class below needs skipUnless(_API_STACK_AVAILABLE): a class without it
+# errors in a kernel-only run instead of skipping.
 if _API_STACK_AVAILABLE:
     from fastapi.testclient import TestClient
 
@@ -213,6 +217,7 @@ class WebDirectoryOverrideTests(unittest.TestCase):
         self.assertTrue(str(resolved).endswith("web"))
 
 
+@unittest.skipUnless(_API_STACK_AVAILABLE, "the optional API dependencies are not installed")
 class WebPageTests(unittest.TestCase):
     """The bundled static page rides on the API app without shadowing it."""
 
