@@ -34,3 +34,6 @@ updates:
           - fastapi
           - python-multipart
           - uvicorn
+        update-types:
+          - minor
+          - patch
