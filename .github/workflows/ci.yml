@@ -12,6 +12,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# PowerShell, the Windows default, reports only the last exit code of a multi-line step;
+# bash here runs with -e and -o pipefail on every OS, so any failing command fails its step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   quality:
     name: Python ${{ matrix.python-version }}
